@@ -1,9 +1,19 @@
+import numpy as np
+import pandas as pd
+import scipy.optimize
+from scipy.interpolate import UnivariateSpline
+import scipy.stats as sp
+import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
+import matplotlib.ticker as ticker
+from matplotlib.lines import Line2D
+import statsmodels.api as sm
 
 
 
 
 
-
+class Binomnial_Multifractal_Rand:
 
 
 
