@@ -1,3 +1,6 @@
+# Asumo que has leído antes los comentarios de Graph.py
+# Guía de estilos, eliminar paquetes no usados, objetos mutables 
+# como parámetros...
 import random
 import numpy as np
 import pandas as pd
@@ -21,6 +24,9 @@ class MMAR(MultifractalCharacteristics):
         Initialize the MMAR object, which inherits attributes and methods 
         from the MultifractalCharacteristics class.
         """
+        # Esto no es correcto. Si el parámetro a fuese igual a 5,
+        # siempre se pasaría el valor 0 a la superclase. Lo correcto sería:
+        # super().__init__(df, tiempo, precio, a, b, npuntos, deltas, kmax)
         super().__init__(df, tiempo, precio, a=0, b=5, npuntos=20, 
                          deltas=np.array([x for x in range(1, 1000)]), kmax=13)
         
@@ -35,6 +41,10 @@ class MMAR(MultifractalCharacteristics):
         kmax = self.kmax
         
         # Calculate normalized trading time
+        # No está mal, pero no diría que está bien. Una clase
+        # que hereda a otra, hereda todos sus métodos. Por tanto,
+        # esto podría escribirse así:
+        # tradingtime = self.multifractal_measure_rand(cumsum=True)
         tradingtime = super().multifractal_measure_rand(cumsum=True)
         
         # Normalize and multiply to obtain the number of days
@@ -55,6 +65,7 @@ class MMAR(MultifractalCharacteristics):
         
         # Plot graphs if grafs flag is True
         if grafs:
+            # Por qué no plt.plot(range(2**kmax), tradingtime)?
             plt.plot(np.array([x for x in range(2**kmax)]), tradingtime)
             plt.show()
             
@@ -64,11 +75,13 @@ class MMAR(MultifractalCharacteristics):
             plt.xlabel("Real Time")
             plt.show()
             
+            # Por qué no plt.plot(range(2**kmax), precio_final)?
             plt.plot([x for x in range(2**kmax)], precio_final)
             plt.title("Graph Without Deformation")
             plt.xlabel("Real Time")
             plt.show()
             
+            # Igual que antes, simplifícalo
             plt.plot(np.array([x for x in range(2**kmax - 1)]), precio_final[1:] - precio_final[:-1], lw=0.5)
             plt.show()
             
@@ -78,11 +91,14 @@ class MMAR(MultifractalCharacteristics):
             plt.show()
         
         # Return results if results flag is True
+        # Veo un poco absurdo el parámetro results. 
+        # Yo devolvería siempre el resultado, quien use
+        # la función que use el resultado si quiere o no
         if results:
             return tradingtime
 
 
-
+    # El parámetro resultado no se usa. No sé qué IDE usas, pero debería avisarte
     def simulacion(self, n=1000, resultado=False):
         # Monte Carlo simulation for n curves compared to the simulation of 1 curve in the previous function
         almacen_tradingtime = []
@@ -93,6 +109,7 @@ class MMAR(MultifractalCharacteristics):
 
         for _ in range(n):
             # Calculate unnormalized trading time
+            # Usar self en vez de super()
             tradingtime = super().multifractal_measure_rand(cumsum=True)
             # Normalized trading time
             tradingtime = 2**kmax * (tradingtime / np.amax(tradingtime))
@@ -107,6 +124,9 @@ class MMAR(MultifractalCharacteristics):
 
         # Data Visualization
         fig, ax = plt.subplots(figsize=(12, 8))
+        # Más elegante:
+        # for trading_time, almacen in zip(almacen_tradingtime, almacen_xt):
+        #   ax.plot(trading_time, almacen, lw=0.5, alpha=0.1)
         for i in range(len(almacen_precio_final)):
             ax.plot(almacen_tradingtime[i], almacen_xt[i], lw=0.5, alpha=0.1)
         ax.plot(almacen_tradingtime[n // 2], almacen_xt[n // 2], lw=0.5, alpha=1, color='b')
@@ -127,6 +147,23 @@ class MMAR(MultifractalCharacteristics):
         ax.grid(True, linestyle='-.')
         plt.tight_layout()
         plt.show()
+
+        # ¡Hay código repetido! Si hay código repetido, entonces toca crear una función.
+        # Por ejemplo, las líneas 126 - 149 podrían reescribirse: 
+        # def plot_simulation(x_values, y_values, x_label, y_label):
+        #     _, ax = plt.subplots(figsize=(12, 8))
+        #     for x, y in zip(x_values, y_values):
+        #         ax.plot(x, y, lw=0.5, alpha=0.1)
+        #     ax.plot(x_values[n // 2], y_values[n // 2], lw=0.5, alpha=1, color='b')
+        #     ax.set_xlabel(x_label, fontsize=22)
+        #     ax.set_ylabel(y_values, fontsize=22)
+        #     ax.tick_params(axis='both', labelsize=22)
+        #     ax.grid(True, linestyle='-.')
+        #     plt.tight_layout()
+        #     plt.show()
+        #
+        # plot_simulation(almacen_tradingtime, almacen_xt, "Real Time (days)", "X(t)")
+        # plot_simulation(range(2**kmax), almacen_tradingtime, "Real Time (days)", "X(t)")
 
         return almacen_tradingtime, almacen_precio_final, almacen_xt
 
@@ -150,6 +187,10 @@ class MMAR(MultifractalCharacteristics):
         # Linear interpolation is employed (although other interpolation methods could be better).
         # The interpolation is computationally the most efficient way to compose functions:
         n = len(almacen_tradingtime)
+        # Parte las líneas muy largas en varias líneas y utiliza el zip que te he dicho antes:
+        # precios_serios = [np.interp(dia, trading_time, precio_final) 
+        #                   for trading_time, precio_final in zip(almacen_tradingtime, almacen_precio_final)
+        #                   if np.interp(dia, trading_time, precio_final)]
         precios_serios = [np.interp(dia, almacen_tradingtime[i], almacen_precio_final[i]) for i in range(n) if np.interp(dia, almacen_tradingtime[i], almacen_precio_final[i])]
         hist, bins = np.histogram(precios_serios, bins=50, density=True)
         media = np.mean(precios_serios)
