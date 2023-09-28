@@ -1,17 +1,15 @@
 # requirements.txt
 
-# Standard Python Libraries
-# random is a built-in library and doesn't need to be included.
 
 # Numeric and Data Analysis Libraries
-numpy #>=1.21.0
-pandas #>=1.3.0
+numpy 
+pandas
 
 # Optimization and Statistics Libraries
-scipy #>=1.7.0
+scipy
 
 # Visualization Libraries
-matplotlib #>=3.4.2
+matplotlib
 
 # External Libraries
-stochastic #>=0.6.1
+stochastic
