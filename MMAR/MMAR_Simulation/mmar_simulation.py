@@ -3,7 +3,6 @@
 # como parámetros...
 import random
 import numpy as np
-import pandas as pd
 import scipy.optimize
 from scipy.interpolate import UnivariateSpline
 import scipy.stats as stats
@@ -27,8 +26,11 @@ class MMAR(MultifractalCharacteristics):
         # Esto no es correcto. Si el parámetro a fuese igual a 5,
         # siempre se pasaría el valor 0 a la superclase. Lo correcto sería:
         # super().__init__(df, tiempo, precio, a, b, npuntos, deltas, kmax)
-        super().__init__(df, tiempo, precio, a=0, b=5, npuntos=20, 
-                         deltas=np.array([x for x in range(1, 1000)]), kmax=13)
+        # Om: Pero si en la superclase tenemos unos valores fijados... qué 
+        # realmente también es problemático verdad?. O esos valores solo 
+        # se ejecutan cuando la superclase no actúa como tal?
+        super().__init__(df, tiempo, precio, a, b, npuntos, 
+                         deltas, kmax)
         
     def path_simulation(self, grafs=False, results=False):
         """
