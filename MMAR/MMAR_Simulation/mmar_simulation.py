@@ -17,19 +17,13 @@ from .multifractalcharacteristics import MultifractalCharacteristics
 # MMAR class that inherits from MultifractalCharacteristics
 class MMAR(MultifractalCharacteristics):
     
-    def __init__(self, df, tiempo, precio, a=0, b=5, npuntos=20, 
-                 deltas=np.array([x for x in range(1, 1000)]), kmax=13):
+    def __init__(self, dataset, time, price, a=0, b=5, npoints=20, 
+                 deltas=None, kmax=13):
         """
         Initialize the MMAR object, which inherits attributes and methods 
         from the MultifractalCharacteristics class.
         """
-        # Esto no es correcto. Si el parámetro a fuese igual a 5,
-        # siempre se pasaría el valor 0 a la superclase. Lo correcto sería:
-        # super().__init__(df, tiempo, precio, a, b, npuntos, deltas, kmax)
-        # Om: Pero si en la superclase tenemos unos valores fijados... qué 
-        # realmente también es problemático verdad?. O esos valores solo 
-        # se ejecutan cuando la superclase no actúa como tal?
-        super().__init__(df, tiempo, precio, a, b, npuntos, 
+        super().__init__(dataset, time, price, a, b, npoints, 
                          deltas, kmax)
         
     def path_simulation(self, grafs=False, results=False):
@@ -94,14 +88,14 @@ class MMAR(MultifractalCharacteristics):
         
         # Return results if results flag is True
         # Veo un poco absurdo el parámetro results. 
-        # Yo devolvería siempre el resultado, quien use
-        # la función que use el resultado si quiere o no
+        # Yo devolvería siempre el result, quien use
+        # la función que use el result si quiere o no
         if results:
             return tradingtime
 
 
-    # El parámetro resultado no se usa. No sé qué IDE usas, pero debería avisarte
-    def simulacion(self, n=1000, resultado=False):
+    # El parámetro result no se usa. No sé qué IDE usas, pero debería avisarte
+    def simulacion(self, n=1000, result=False):
         # Monte Carlo simulation for n curves compared to the simulation of 1 curve in the previous function
         almacen_tradingtime = []
         almacen_xt = []
@@ -125,47 +119,20 @@ class MMAR(MultifractalCharacteristics):
             almacen_precio_final.append(precio_final)
 
         # Data Visualization
-        fig, ax = plt.subplots(figsize=(12, 8))
-        # Más elegante:
-        # for trading_time, almacen in zip(almacen_tradingtime, almacen_xt):
-        #   ax.plot(trading_time, almacen, lw=0.5, alpha=0.1)
-        for i in range(len(almacen_precio_final)):
-            ax.plot(almacen_tradingtime[i], almacen_xt[i], lw=0.5, alpha=0.1)
-        ax.plot(almacen_tradingtime[n // 2], almacen_xt[n // 2], lw=0.5, alpha=1, color='b')
-        ax.set_xlabel("Real Time (days)", fontsize=22)
-        ax.set_ylabel("X(t)", fontsize=22)
-        ax.tick_params(axis='both', labelsize=22)
-        ax.grid(True, linestyle='-.')
-        plt.tight_layout()
-        plt.show()
+        def plot_simulation(x_values, y_values, x_label, y_label):
+            _, ax = plt.subplots(figsize=(12, 8))
+            for x, y in zip(x_values, y_values):
+                ax.plot(x, y, lw=0.5, alpha=0.1)
+            ax.plot(x_values[n // 2], y_values[n // 2], lw=0.5, alpha=1, color='b')
+            ax.set_xlabel(x_label, fontsize=22)
+            ax.set_ylabel(y_values, fontsize=22)
+            ax.tick_params(axis='both', labelsize=22)
+            ax.grid(True, linestyle='-.')
+            plt.tight_layout()
+            plt.show()
 
-        fig, ax = plt.subplots(figsize=(12, 8))
-        for i in range(len(almacen_tradingtime)):
-            ax.plot([x for x in range(2**kmax)], almacen_tradingtime[i], lw=0.5, alpha=0.1)
-        ax.plot([x for x in range(2**kmax)], almacen_tradingtime[n // 2], lw=0.5, alpha=1, color='b')
-        ax.set_xlabel("Real Time (days)", fontsize=22)
-        ax.set_ylabel("Trading Time (days)", fontsize=22)
-        ax.tick_params(axis='both', labelsize=22)
-        ax.grid(True, linestyle='-.')
-        plt.tight_layout()
-        plt.show()
-
-        # ¡Hay código repetido! Si hay código repetido, entonces toca crear una función.
-        # Por ejemplo, las líneas 126 - 149 podrían reescribirse: 
-        # def plot_simulation(x_values, y_values, x_label, y_label):
-        #     _, ax = plt.subplots(figsize=(12, 8))
-        #     for x, y in zip(x_values, y_values):
-        #         ax.plot(x, y, lw=0.5, alpha=0.1)
-        #     ax.plot(x_values[n // 2], y_values[n // 2], lw=0.5, alpha=1, color='b')
-        #     ax.set_xlabel(x_label, fontsize=22)
-        #     ax.set_ylabel(y_values, fontsize=22)
-        #     ax.tick_params(axis='both', labelsize=22)
-        #     ax.grid(True, linestyle='-.')
-        #     plt.tight_layout()
-        #     plt.show()
-        #
-        # plot_simulation(almacen_tradingtime, almacen_xt, "Real Time (days)", "X(t)")
-        # plot_simulation(range(2**kmax), almacen_tradingtime, "Real Time (days)", "X(t)")
+        plot_simulation(almacen_tradingtime, almacen_xt, "Real Time (days)", "X(t)")
+        plot_simulation(range(2**kmax), almacen_tradingtime, "Real Time (days)", "X(t)")
 
         return almacen_tradingtime, almacen_precio_final, almacen_xt
 
@@ -190,10 +157,9 @@ class MMAR(MultifractalCharacteristics):
         # The interpolation is computationally the most efficient way to compose functions:
         n = len(almacen_tradingtime)
         # Parte las líneas muy largas en varias líneas y utiliza el zip que te he dicho antes:
-        # precios_serios = [np.interp(dia, trading_time, precio_final) 
-        #                   for trading_time, precio_final in zip(almacen_tradingtime, almacen_precio_final)
-        #                   if np.interp(dia, trading_time, precio_final)]
-        precios_serios = [np.interp(dia, almacen_tradingtime[i], almacen_precio_final[i]) for i in range(n) if np.interp(dia, almacen_tradingtime[i], almacen_precio_final[i])]
+        precios_serios = [np.interp(dia, trading_time, precio_final) 
+                           for trading_time, precio_final in zip(almacen_tradingtime, almacen_precio_final)
+                           if np.interp(dia, trading_time, precio_final)]
         hist, bins = np.histogram(precios_serios, bins=50, density=True)
         media = np.mean(precios_serios)
         stdd = np.std(precios_serios)
