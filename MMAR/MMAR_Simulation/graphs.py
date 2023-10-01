@@ -11,12 +11,12 @@ class Graphs():
     #        Mejor aún, se puede usar np.arange
     #     2. Mucho ojo con poner objetos mutables como parámetros por defecto. Malísima práctica:
     #     https://florimond.dev/en/posts/2018/08/python-mutable-defaults-are-the-source-of-all-evil/
-    def __init__(self, df, tiempo, precio, a=0, b=5, npuntos=20, deltas=np.array([x for x in range(1, 1000)]), kmax=13):
+    def __init__(self, dataset, time, price, a=0, b=5, npoints=20, deltas=None, kmax=13):
         """
         Initialize the Graphs class with the given parameters.
 
-        tiempo: String indicating the column name representing the time interval
-        precio: String indicating the column name representing the asset price
+        time: String indicating the column name representing the time interval
+        price: String indicating the column name representing the asset price
         deltas: nd.array indicating which are going to be the intervals from where
                 is going to be stracted the multifractal characteristics. 
 
@@ -24,40 +24,42 @@ class Graphs():
         allowing flexibility in data manipulation.
 
         The instance attributes:
-            - df: The entire DataFrame
+            - dataset: The entire DataFrame
             - date: Numpy array of temporal values as dates
             - days: Numpy array of temporal values in days
             - Price: Numpy array of asset prices
             - X_t: Numpy array representing X(t)
-            - variacionprecios: Relative price variation
+            - variacionprices: Relative price variation
         """
         # Falta homogeneidad en los nombres. O todo en español, o todo en inglés.
-        
+
+        if a is None:
+            a = np.arange(1, 1000)
         # Initialize attributes
-        # Llamar df a una variable no significa nada. Podría llamarse 'datos' o cualquier otro
+        # Llamar dataset a una variable no significa nada. Podría llamarse 'datos' o cualquier otro
         # nombre más descriptivo
-        self.df = df
-        self.tiempo = tiempo
-        self.precio = precio
+        self.dataset = dataset
+        self.time = time
+        self.price = price
         self.a = a
         self.b = b
-        self.npuntos = npuntos
+        self.npoints = npoints
         self.deltas = deltas
         self.kmax = kmax
 
         # Convert columns to numpy arrays
-        self.date = df[tiempo].to_numpy()
+        self.date = dataset[time].to_numpy()
         # Se puede reescribir (como en la línea 8)
         self.days = np.array([x for x in range(len(self.date))])
         # Nombres de los atributos siempre en minúscula. Intenta seguir la guía de estilo PEP8
-        self.Price = df[precio].to_numpy()
+        self.Price = dataset[price].to_numpy()
 
         # Calculate X(t) values
         self.X_t = np.log(self.Price) - np.log(self.Price[0])
 
         # Calculate price variation
         # Renombrar (guía PEP8)
-        self.variacionprecios = self.graf_Price_change(deltat=1, result=True, graf=False)
+        self.variacionprices = self.graf_Price_change(deltat=1, result=True, graf=False)
 
     def grafPrice(self):
         """
@@ -105,20 +107,20 @@ class Graphs():
         """
         
         # Calculate price variation
-        variacion_precios1 = self.Price[deltat::deltat] - self.Price[:-deltat:deltat]
+        variacion_prices1 = self.Price[deltat::deltat] - self.Price[:-deltat:deltat]
         
         # Calculate the average between two prices
         # Más elegante: media = (price[:-1] + price[1:])/2
         media = [(self.Price[i] + self.Price[i + 1]) / 2 for i in range(len(self.Price) - 1)]
         
         # Calculate relative price variation
-        # Más elegante: variacion_precios = variacion_precios1/media[:len(variacion_precios1)]
-        variacion_precios = [variacion_precios1[i] / media[i] for i in range(len(variacion_precios1))]
+        # Más elegante: variacion_prices = variacion_prices1/media[:len(variacion_prices1)]
+        variacion_prices = [variacion_prices1[i] / media[i] for i in range(len(variacion_prices1))]
 
         # Plotting if graf is True
         if graf:
             fig, ax = plt.subplots(figsize=(24, 5))
-            ax.plot(self.days[:-1], variacion_precios, linewidth=0.5)
+            ax.plot(self.days[:-1], variacion_prices, linewidth=0.5)
 
             ax.xaxis.set_major_locator(plt.MaxNLocator(6))
             date_fmt = mdates.DateFormatter('%Y-%m-%d')
@@ -126,7 +128,7 @@ class Graphs():
 
             ax.grid(which='both', axis='both', linestyle='-.', linewidth=1, alpha=0.7, zorder=0, markevery=1, color='grey')
             
-            ax.set_title(f'{self.precio} Price History', fontsize=16, fontweight='bold')
+            ax.set_title(f'{self.price} Price History', fontsize=16, fontweight='bold')
             ax.set_ylabel('Relative Price Change ($)', fontsize=12, fontweight='bold')
             ax.set_xlabel('Time (ET)', fontsize=12, fontweight='bold')
             ax.legend(loc='upper left', fontsize=12)
@@ -136,7 +138,7 @@ class Graphs():
 
         # Return the calculated values if result is True
         if result:
-            return variacion_precios1
+            return variacion_prices1
 
     def grafX_t(self):
         """
@@ -153,11 +155,9 @@ class Graphs():
 
         ax.grid(which='both', axis='both', linestyle='-.', linewidth=1, alpha=0.7, zorder=0, markevery=1, color='grey')
 
-        ax.set_title(f'{self.precio} Price History', fontsize=16, fontweight='bold')
+        ax.set_title(f'{self.price} Price History', fontsize=16, fontweight='bold')
         ax.set_ylabel('X_t ($)', fontsize=12, fontweight='bold')
         ax.set_xlabel('Time (ET)', fontsize=12, fontweight='bold')
-
-        #ax.legend(loc='upper left', fontsize=12)
 
         closing_time = '16:00:00'
         ax.text(self.date[-1], self.X_t.max(), f'Closing Time: {closing_time} ET',
