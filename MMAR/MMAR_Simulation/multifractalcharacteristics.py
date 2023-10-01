@@ -13,13 +13,13 @@ from .graphs import Graphs
 
 class MultifractalCharacteristics(Graphs):
 
-    def __init__(self, df, tiempo, precio, a=0, b=5, npuntos=20, deltas=np.array([x for x in range(1, 1000)]), kmax=13):
+    def __init__(self, dataset, time, price, a=0, b=5, npoints=20, deltas=None, kmax=13):
         # Heredamos los atributos de Graphs. 
-        super().__init__(df, tiempo, precio, a=0, b=5, npuntos=20, deltas=np.array([x for x in range(1, 1000)]), kmax=13)
-        self.partition = self.Partition_functions(graf1=False, resultado=True)
-        self.tau = self.tauandalpha(graf=False, resultados=True)[0]
-        self.falpha = self.tauandalpha(graf=False, resultados=True)[1]
-        self.derivada = self.tauandalpha(graf=False, resultados=True)[2]
+        super().__init__(dataset, time, price, a, b, npoints, deltas, kmax)
+        self.partition = self.Partition_functions(graf1=False, result=True)
+        self.tau = self.tauandalpha(graf=False, results=True)[0]
+        self.falpha = self.tauandalpha(graf=False, results=True)[1]
+        self.derivada = self.tauandalpha(graf=False, results=True)[2]
         self.h1 = self.Hurst(graf=False)
         self.posicion_max = np.argmax(self.falpha)
         self.alpha0 = self.derivada[self.posicion_max]
@@ -29,7 +29,7 @@ class MultifractalCharacteristics(Graphs):
 
 
 
-    def Partition_functions(self, alpha=0.05, graf1=True, resultado=False):
+    def Partition_functions(self, alpha=0.05, graf1=True, result=False):
         """
         alpha: Significance level
         qs: List of moments 'q' we want to compute
@@ -39,32 +39,32 @@ class MultifractalCharacteristics(Graphs):
         
         a = self.a
         b = self.b
-        npuntos = self.npuntos
+        npoints = self.npoints
         deltas = self.deltas
         ldeltas = len(deltas)  # Number of points for each partition "line" for different moments.
         mdeltas = np.mean(deltas)
         vardeltas = np.var(deltas)
-        qs = np.linspace(a, b, npuntos)
+        qs = np.linspace(a, b, npoints)
 
         # Compute partition functions for each delta and q; then perform OLS regression.
         # Each element in the list partition_functions corresponds to a partition function for a given delta and q.
         partition_functions = [[np.sum((abs(self.X_t[deltat::deltat] - self.X_t[:-deltat:deltat])) ** q) for deltat in deltas] for q in qs]
-        adjustment_part_functions = [np.polyfit(np.log10(deltas), np.log10(partition_functions[i] / partition_functions[i][0]), 1) for i in range(npuntos)]
-        coeficiente_normalizador = [adjustment_part_functions[i][1] for i in range(npuntos)]
+        adjustment_part_functions = [np.polyfit(np.log10(deltas), np.log10(partition_functions[i] / partition_functions[i][0]), 1) for i in range(npoints)]
+        coeficiente_normalizador = [adjustment_part_functions[i][1] for i in range(npoints)]
 
         # Compute residual variances; work with logarithms.
-        srs = [(np.sum((np.log10(partition_functions[i] / partition_functions[i][0]) - np.poly1d(adjustment_part_functions[i])(np.log10(deltas))) ** 2) / (ldeltas - 2)) ** 0.5 for i in range(npuntos)]
+        srs = [(np.sum((np.log10(partition_functions[i] / partition_functions[i][0]) - np.poly1d(adjustment_part_functions[i])(np.log10(deltas))) ** 2) / (ldeltas - 2)) ** 0.5 for i in range(npoints)]
 
         # Compute confidence intervals for mean estimation; the domain set is deltas.
-        intervalos_conf = [[t.ppf(alpha / 2, ldeltas - 2) * srs[i] * np.sqrt(1 / ldeltas + (deltas[j] - mdeltas) ** 2 / ((ldeltas - 1) * vardeltas)) for j in range(ldeltas)] for i in range(npuntos)]
+        intervalos_conf = [[t.ppf(alpha / 2, ldeltas - 2) * srs[i] * np.sqrt(1 / ldeltas + (deltas[j] - mdeltas) ** 2 / ((ldeltas - 1) * vardeltas)) for j in range(ldeltas)] for i in range(npoints)]
 
         # Compute confidence intervals for the intercept and slope, which is what interests us.
-        intervalos_conf_ordenada = [t.ppf(alpha / 2, ldeltas - 2) * srs[i] * np.sqrt(1 / ldeltas + (mdeltas) ** 2 / ((ldeltas - 1) * vardeltas)) for i in range(npuntos)]
-        intervalos_conf_pendiente = [t.ppf(alpha / 2, ldeltas - 2) * srs[i] / (np.sqrt(ldeltas - 1) * vardeltas) for i in range(npuntos)]
+        intervalos_conf_ordenada = [t.ppf(alpha / 2, ldeltas - 2) * srs[i] * np.sqrt(1 / ldeltas + (mdeltas) ** 2 / ((ldeltas - 1) * vardeltas)) for i in range(npoints)]
+        intervalos_conf_pendiente = [t.ppf(alpha / 2, ldeltas - 2) * srs[i] / (np.sqrt(ldeltas - 1) * vardeltas) for i in range(npoints)]
 
         # Perform correlation test (equivalent to cor.test in R). The first list will have correlation values and the second will have p-values.
-        corrtest1 = [stats.pearsonr(np.log10(deltas), np.log10(partition_functions[i] / partition_functions[i][0]))[0] for i in range(npuntos)]
-        corrtest2 = np.array([stats.pearsonr(np.log10(deltas), np.log10(partition_functions[i] / partition_functions[i][0]))[1] for i in range(npuntos)])
+        corrtest1 = [stats.pearsonr(np.log10(deltas), np.log10(partition_functions[i] / partition_functions[i][0]))[0] for i in range(npoints)]
+        corrtest2 = np.array([stats.pearsonr(np.log10(deltas), np.log10(partition_functions[i] / partition_functions[i][0]))[1] for i in range(npoints)])
         qslim = qs[corrtest2 <= alpha]
 
         
@@ -114,7 +114,7 @@ class MultifractalCharacteristics(Graphs):
             plt.subplots_adjust(bottom=0.2)
             plt.show()
 
-        if resultado:
+        if result:
             #print(f"The adjustment values (a, m respectively) are {adjustment_part_functions}" + 
             #      f"\nErrors associated with the ordinate (constant term) are given by {intervalos_conf_ordenada}")
             #print(f"The null hypothesis is rejected up to the value q = {qslim[-1]}.")
@@ -130,31 +130,31 @@ class MultifractalCharacteristics(Graphs):
 
 
 
-    def tauandalpha(self, alpha=0.05, graf=True, resultados=False):
+    def tauandalpha(self, alpha=0.05, graf=True, results=False):
         plt.style.use('default')  # Set the plot style
         a = self.a
         b = self.b
-        npuntos = self.npuntos
+        npoints = self.npoints
         deltas = self.deltas
         ldeltas = len(deltas)  # Number of partition points for different moments
         mdeltas = np.mean(deltas)
         vardeltas = np.var(deltas)
-        qs = np.linspace(a, b, npuntos)
+        qs = np.linspace(a, b, npoints)
 
         # Compute partition functions
         partition_functions = [[np.sum((abs(self.X_t[deltat::deltat] - self.X_t[:-deltat:deltat])) ** q) for deltat in deltas] for q in qs]
-        adjustment_part_functions = [np.polyfit(np.log10(deltas), np.log10(partition_functions[i] / partition_functions[i][0]), 1) for i in range(npuntos)]
-        coeficiente_normalizador = [adjustment_part_functions[i][1] for i in range(npuntos)]
+        adjustment_part_functions = [np.polyfit(np.log10(deltas), np.log10(partition_functions[i] / partition_functions[i][0]), 1) for i in range(npoints)]
+        coeficiente_normalizador = [adjustment_part_functions[i][1] for i in range(npoints)]
 
         # Compute confidence intervals again
-        srs = [(np.sum((np.log10(partition_functions[i]) - np.poly1d(adjustment_part_functions[i])(np.log10(deltas))) ** 2) / (ldeltas - 2)) ** 0.5 for i in range(npuntos)]
-        intervalos_conf = [[t.ppf(alpha / 2, ldeltas - 2) * srs[i] * np.sqrt(1 / ldeltas + (deltas[j] - mdeltas) ** 2 / ((ldeltas - 1) * vardeltas)) for j in range(ldeltas)] for i in range(npuntos)]
-        intervalos_conf_ordenada = [t.ppf(alpha / 2, ldeltas - 2) * srs[i] * np.sqrt(1 / ldeltas + (mdeltas) ** 2 / ((ldeltas - 1) * vardeltas)) for i in range(npuntos)]
-        intervalos_conf_pendiente = [t.ppf(alpha / 2, ldeltas - 2) * srs[i] / (np.sqrt(ldeltas - 1) * vardeltas) for i in range(npuntos)]
+        srs = [(np.sum((np.log10(partition_functions[i]) - np.poly1d(adjustment_part_functions[i])(np.log10(deltas))) ** 2) / (ldeltas - 2)) ** 0.5 for i in range(npoints)]
+        intervalos_conf = [[t.ppf(alpha / 2, ldeltas - 2) * srs[i] * np.sqrt(1 / ldeltas + (deltas[j] - mdeltas) ** 2 / ((ldeltas - 1) * vardeltas)) for j in range(ldeltas)] for i in range(npoints)]
+        intervalos_conf_ordenada = [t.ppf(alpha / 2, ldeltas - 2) * srs[i] * np.sqrt(1 / ldeltas + (mdeltas) ** 2 / ((ldeltas - 1) * vardeltas)) for i in range(npoints)]
+        intervalos_conf_pendiente = [t.ppf(alpha / 2, ldeltas - 2) * srs[i] / (np.sqrt(ldeltas - 1) * vardeltas) for i in range(npoints)]
 
         # Compute tau as in the binomial case
         tau = [sublistasajustes[0] for sublistasajustes in adjustment_part_functions]
-        h = (b - a) / npuntos  # Distance between points in qs, as in the binomial case
+        h = (b - a) / npoints  # Distance between points in qs, as in the binomial case
 
         # Compute the derivative using splines
         intervalo1 = np.linspace(qs[0], qs[-1], 1000)
@@ -163,7 +163,7 @@ class MultifractalCharacteristics(Graphs):
         legendre1 = intervalo1 * derivada1 - spline(intervalo1)
 
         # Compute confidence intervals for the scaling function tau
-        tausposibles = [[np.log10(partition_functions[i][j] / partition_functions[i][0]) / np.log10(deltas[j]) for i in range(npuntos)] for j in range(1, ldeltas)]
+        tausposibles = [[np.log10(partition_functions[i][j] / partition_functions[i][0]) / np.log10(deltas[j]) for i in range(npoints)] for j in range(1, ldeltas)]
         splinesposibles = [UnivariateSpline(qs, taus) for taus in tausposibles]
         lengendreposbiles = [intervalo1 * splines.derivative()(intervalo1) - splines(intervalo1) for splines in splinesposibles]
 
@@ -205,7 +205,7 @@ class MultifractalCharacteristics(Graphs):
             plt.tight_layout()
             plt.show()
 
-        if resultados:
+        if results:
             #return (tau, coeficiente_normalizador, intervalos_conf_ordenada, intervalos_conf_pendiente)
             return spline(intervalo1), legendre1, derivada1
 
@@ -227,9 +227,9 @@ class MultifractalCharacteristics(Graphs):
 
         # Extract relevant attributes from the object
         a, b = self.a, self.b
-        npuntos = self.npuntos
+        npoints = self.npoints
         deltas = self.deltas
-        qs = np.linspace(a, b, npuntos)
+        qs = np.linspace(a, b, npoints)
 
         # Compute partition functions and their Ordinary Least Squares (OLS) linear adjustments
         partition_functions = [[np.sum((abs(self.X_t[deltat::deltat] - self.X_t[:-deltat:deltat])) ** q) 
@@ -239,7 +239,7 @@ class MultifractalCharacteristics(Graphs):
 
         # Compute tau values similar to the deterministic binomial measure case
         tau = [adjustment[0] for adjustment in adjustment_part_functions]
-        h = (b - a) / npuntos
+        h = (b - a) / npoints
 
         # Perform spline interpolation and derivative calculations
         intervalo1 = np.linspace(qs[0], qs[-1], 1000)
@@ -335,9 +335,9 @@ class MultifractalCharacteristics(Graphs):
         # Plot the results if graf1 is True
         if graf1:
             coef = False
-            intervalos = [np.linspace(i * b ** -kmax, (i + 1) * b ** -kmax, m) for i in range(b ** kmax)]
+            intervals = [np.linspace(i * b ** -kmax, (i + 1) * b ** -kmax, m) for i in range(b ** kmax)]
             output = [coef * np.ones(m) for coef in lista_general[-1]]
-            x = np.array([item for sublist in intervalos for item in sublist])
+            x = np.array([item for sublist in intervals for item in sublist])
             y = np.array([item for sublist in output for item in sublist])
             
             # Handle potential empty or NaN array
