@@ -33,8 +33,8 @@ class Graphs():
         """
         # Falta homogeneidad en los nombres. O todo en español, o todo en inglés.
 
-        if a is None:
-            a = np.arange(1, 1000)
+        if deltas is None:
+            deltas = np.arange(1, 1000)
         # Initialize attributes
         # Llamar dataset a una variable no significa nada. Podría llamarse 'datos' o cualquier otro
         # nombre más descriptivo
