@@ -9,6 +9,7 @@ sys.path. Pero en ese caso no lo tenemos en el path de ninguno de ellos. Ese es 
 por el cual no lo podemos ejecutar amenos que lo annadamos manualmente. En cambio para 
 añadir ficheros, como añadimos la ruta completa del archivo neste no debe encontrarse en una
 ruta contenida en sys.path.
+
 '''
 from MMAR import Binomial_Multifractal_Det
 
