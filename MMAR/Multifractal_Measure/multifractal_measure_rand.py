@@ -19,7 +19,7 @@ class Binomnial_Multifractal_Rand:
 
 
 
-def multifractal_measure_rand(kmax, b = 2, m = 5, coef = True, graf1 = False):
+def multifractal_measure_rand1(kmax, b = 2, m = 5, coef = True, graf1 = False):
     
     """
     Generates a multiplicative cascade for a random measure. This is the most
@@ -113,7 +113,7 @@ def multifractal_measure_rand(kmax, b = 2, m = 5, coef = True, graf1 = False):
 
 
 
-def multifractal_measure_rand(self, b = 2, m = 1, masas1 = False, masas2 = True, coef = False, graf1 = False, cumsum = False):
+def multifractal_measure_rand2(self, b = 2, m = 1, masas1 = False, masas2 = True, coef = False, graf1 = False, cumsum = False):
     """
     Medida multifractal que cumple con los parámetros lambda y sigma de la distribución lognormal
     de la pagina 22 del DM/Dollar. Para mas info mirar Simulacion_sucio1:
