@@ -50,19 +50,19 @@ class Graphs:
         self.deltas = deltas
         self.kmax = kmax
 
-        # Convert columns to numpy arrays
-        self.date = dataset[time].to_numpy()
-        # Se puede reescribir (como en la línea 8)
-        self.days = np.array([x for x in range(len(self.date))])
-        # Nombres de los atributos siempre en minúscula. Intenta seguir la guía de estilo PEP8
-        self.Price = dataset[price].to_numpy()
+        def __post_init__(self):
+            # Convert columns to numpy arrays
+            self.date = self.dataset[time].to_numpy()
+            # Se puede reescribir (como en la línea 8)
+            self.days = np.array([x for x in range(len(self.date))])
+            # Nombres de los atributos siempre en minúscula. Intenta seguir la guía de estilo PEP8
+            self.Price = self.dataset[price].to_numpy()
+            # Calculate X(t) values
+            self.X_t = np.log(self.Price) - np.log(self.Price[0])
 
-        # Calculate X(t) values
-        self.X_t = np.log(self.Price) - np.log(self.Price[0])
-
-        # Calculate price variation
-        # Renombrar (guía PEP8)
-        self.variacionprices = self.graf_Price_change(deltat=1, result=True, graf=False)
+            # Calculate price variation
+            # Renombrar (guía PEP8)
+            self.variacionprices = self.graf_Price_change(deltat=1, result=True, graf=False)
 
     def grafPrice(self):
         """

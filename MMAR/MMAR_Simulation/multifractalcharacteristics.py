@@ -11,7 +11,6 @@ from .graphs import Graphs
 
 
 class MultifractalCharacteristics(Graphs):
-
     """
 
     Here's the translation of the provided Python class description into English:
@@ -514,7 +513,7 @@ class MultifractalCharacteristics(Graphs):
 
             ax1 = plt.subplot(2, 2, 1)
             ax1.plot(qs, tau, lw=2, color="r", ls="-.")
-            ax1.plot(qs, p(qs), lw=2, color="green")
+            # ax1.plot(qs, p(qs), lw=2, color="green")
             ax1.set_title("Tau moment")
             ax1.set_xlabel("q, slopes of f(alpha)")
             ax1.set_ylabel("Tau")
@@ -602,8 +601,7 @@ class MultifractalCharacteristics(Graphs):
         if graf1:
             coef = False
             intervals = [
-                np.linspace(i * b**-kmax, (i + 1) * b**-kmax, m)
-                for i in range(b**kmax)
+                np.linspace(i * b**-kmax, (i + 1) * b**-kmax, m) for i in range(b**kmax)
             ]
             output = [coef * np.ones(m) for coef in lista_general[-1]]
             x = np.array([item for sublist in intervals for item in sublist])
