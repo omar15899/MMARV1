@@ -1,221 +1,306 @@
-# Asumo que has leído antes los comentarios de Graph.py
-# Guía de estilos, eliminar paquetes no usados, objetos mutables
-# como parámetros...
-import random
 import numpy as np
-import scipy.optimize
-from scipy.interpolate import UnivariateSpline
-import scipy.stats as stats
-from scipy.stats import t
 import matplotlib.pyplot as plt
-from matplotlib.lines import Line2D
-
-# Modulos de librerias externas
 from stochastic.processes.continuous import FractionalBrownianMotion
 from .multifractalcharacteristics import MultifractalCharacteristics
+import scipy.stats as stats
 
 
-# MMAR class that inherits from MultifractalCharacteristics
 class MMAR(MultifractalCharacteristics):
+    """
+    MMAR (Multifractal Model of Asset Returns) class that inherits from
+    MultifractalCharacteristics. It uses fractional Brownian motion to
+    simulate price paths under time deformation dictated by a multifractal
+    measure.
+
+    Parameters
+    ----------
+    dataset : pd.DataFrame or np.ndarray
+        The dataset with time and price columns.
+    time : str
+        Column name or key that identifies the time axis in 'dataset'.
+    price : str
+        Column name or key that identifies the price column in 'dataset'.
+    a : float, optional
+        Lower bound for q-range in the multifractal analysis (default=0).
+    b : float, optional
+        Upper bound for q-range in the multifractal analysis (default=5).
+    npoints : int, optional
+        Number of q-values for the multifractal analysis (default=20).
+    deltas : array-like or None, optional
+        Array of time intervals used in the partition function computations.
+        If None, defaults to np.arange(1, 1000).
+    kmax : int, optional
+        Maximum resolution (2^kmax data points) for multifractal measure
+        generation and FBM simulation (default=13).
+    """
+
     def __init__(
         self, dataset, time, price, a=0, b=5, npoints=20, deltas=None, kmax=13
     ):
         """
-        Initialize the MMAR object, which inherits attributes and methods
-        from the MultifractalCharacteristics class.
+        Initializes the MMAR object, leveraging the base initialization of
+        the MultifractalCharacteristics class.
         """
         super().__init__(dataset, time, price, a, b, npoints, deltas, kmax)
 
     def path_simulation(self, grafs=False, results=False):
         """
-        Simulate a path using fractional Brownian motion.
-        grafs: Boolean to indicate if graphs should be plotted.
-        results: Boolean to indicate if results should be returned.
+        Simulate a single price path using:
+        1) A multifractal time deformation via multifractal_measure_rand().
+        2) Fractional Brownian motion increments in 'physical' time.
+
+        Parameters
+        ----------
+        grafs : bool
+            Whether to produce diagnostic plots.
+        results : bool
+            Whether to return the computed trading time array.
+
+        Returns
+        -------
+        tradingtime : np.ndarray, optional
+            The (normalized) multifractal trading time if results=True.
         """
-
-        # kmax is 2^kmax, which represents the number of days we want to simulate
+        # Number of data points is 2^kmax
         kmax = self.kmax
+        npts = 2**kmax
 
-        # Calculate normalized trading time
-        # No está mal, pero no diría que está bien. Una clase
-        # que hereda a otra, hereda todos sus métodos. Por tanto,
-        # esto podría escribirse así:
-        # tradingtime = self.multifractal_measure_rand(cumsum=True)
-        tradingtime = super().multifractal_measure_rand(cumsum=True)
+        # 1) Compute multifractal trading time via cumsum
+        #    This is the time deformation function
+        tradingtime = self.multifractal_measure_rand(cumsum=True)
+        # Normalize and scale to the range [0, 2^kmax]
+        tradingtime = npts * (tradingtime / np.max(tradingtime))
 
-        # Normalize and multiply to obtain the number of days
-        tradingtime = 2**kmax * (tradingtime / np.amax(tradingtime))
-
-        # Calculate the fractional Brownian motion (fbm)
-
-        # 1. Create an instance of the class with the fbm object
+        # 2) Fractional Brownian Motion (FBM)
         fbm = FractionalBrownianMotion(hurst=self.h1)
+        # The 'stochastic' package uses _sample_fractional_brownian_motion(...)
+        # internally for generating the FBM increments
+        simulacion_fbm = fbm._sample_fractional_brownian_motion(npts - 1)
 
-        # 2. Use the _sample_fractional_brownian_motion method to create the list of increments
-        # relative to real time.
-        simulacionfbm = fbm._sample_fractional_brownian_motion(2**kmax - 1)
+        # 3) Construct simulated log-prices: X(t) = increments of FBM
+        xt_simulados = simulacion_fbm
+        # Use self.Price[0] as initial price
+        precio_final = self.Price[0] * np.exp(xt_simulados)
 
-        # Calculate the simulated Xt values relative to real time
-        xtsimulados = simulacionfbm
-        precio_final = self.Price[0] * np.exp(xtsimulados)
-
-        # Plot graphs if grafs flag is True
+        # 4) Optionally plot
         if grafs:
-            # Por qué no plt.plot(range(2**kmax), tradingtime)?
-            plt.plot(np.array([x for x in range(2**kmax)]), tradingtime)
+            plt.style.use("default")
+
+            # Plot the multifractal trading time vs. integer steps
+            plt.figure(figsize=(10, 4))
+            plt.plot(range(npts), tradingtime, label="Multifractal Trading Time")
+            plt.xlabel("Integer Index")
+            plt.ylabel("Trading Time")
+            plt.grid(True, linestyle="--", alpha=0.7)
+            plt.legend()
+            plt.tight_layout()
             plt.show()
 
-            # In the graph, function composition is performed
-            plt.plot(tradingtime, precio_final)
-            plt.title("Graph with Deformation")
-            plt.xlabel("Real Time")
+            # Plot price vs. multifractal time
+            plt.figure(figsize=(10, 4))
+            plt.plot(tradingtime, precio_final, label="Price (Deformed Time)")
+            plt.title("Price under Multifractal Time Deformation")
+            plt.xlabel("Multifractal Trading Time")
+            plt.ylabel("Price")
+            plt.grid(True, linestyle="--", alpha=0.7)
+            plt.legend()
+            plt.tight_layout()
             plt.show()
 
-            # Por qué no plt.plot(range(2**kmax), precio_final)?
-            plt.plot([x for x in range(2**kmax)], precio_final)
-            plt.title("Graph Without Deformation")
-            plt.xlabel("Real Time")
+            # Plot price vs. integer steps
+            plt.figure(figsize=(10, 4))
+            plt.plot(range(npts), precio_final, label="Price (Physical Time)")
+            plt.title("Price in Physical (Integer) Time")
+            plt.xlabel("Integer Time Steps")
+            plt.ylabel("Price")
+            plt.grid(True, linestyle="--", alpha=0.7)
+            plt.legend()
+            plt.tight_layout()
             plt.show()
 
-            # Igual que antes, simplifícalo
+            # Plot increments of price
+            plt.figure(figsize=(10, 4))
             plt.plot(
-                np.array([x for x in range(2**kmax - 1)]),
+                range(npts - 1),
                 precio_final[1:] - precio_final[:-1],
                 lw=0.5,
+                label="Price Increments",
             )
+            plt.title("Price Increments in Physical Time")
+            plt.xlabel("Integer Time Steps")
+            plt.ylabel("Δ Price")
+            plt.grid(True, linestyle="--", alpha=0.7)
+            plt.legend()
+            plt.tight_layout()
             plt.show()
 
-            plt.plot(tradingtime, precio_final)
-            plt.title("Graph Without Deformation")
-            plt.xlabel("TradingTime")
-            plt.show()
-
-        # Return results if results flag is True
-        # Veo un poco absurdo el parámetro results.
-        # Yo devolvería siempre el result, quien use
-        # la función que use el result si quiere o no
         if results:
             return tradingtime
 
-    # El parámetro result no se usa. No sé qué IDE usas, pero debería avisarte
     def simulacion(self, n=1000, result=False):
-        # Monte Carlo simulation for n curves compared to the simulation of 1 curve in the previous function
+        """
+        Monte Carlo simulation of n price paths, each constructed by:
+        1) Generating a multifractal trading time.
+        2) Generating fractional Brownian motion increments.
+        3) Composing them to obtain final prices.
+
+        Parameters
+        ----------
+        n : int
+            Number of simulated paths (default=1000).
+        result : bool
+            If True, return the arrays with the simulated paths.
+
+        Returns
+        -------
+        (almacen_tradingtime, almacen_precio_final, almacen_xt) : tuple of lists
+            - almacen_tradingtime : list of multifractal time arrays for each of n simulations
+            - almacen_precio_final: list of final price arrays for each of n simulations
+            - almacen_xt : list of FBM increments arrays for each of n simulations
+        """
+        kmax = self.kmax
+        npts = 2**kmax
+
         almacen_tradingtime = []
         almacen_xt = []
         almacen_precio_final = []
 
-        kmax = self.kmax
-
         for _ in range(n):
-            # Calculate unnormalized trading time
-            # Usar self en vez de super()
-            tradingtime = super().multifractal_measure_rand(cumsum=True)
-            # Normalized trading time
-            tradingtime = 2**kmax * (tradingtime / np.amax(tradingtime))
-            fbm = FractionalBrownianMotion(hurst=self.h1)
-            simulacionfbm = fbm._sample_fractional_brownian_motion(2**kmax - 1)
-            xtsimulados = simulacionfbm
-            precio_final = self.Price[-1] * np.exp(xtsimulados)
+            # 1) Generate multifractal time (unnormalized) + normalization
+            tradingtime = self.multifractal_measure_rand(cumsum=True)
+            tradingtime = npts * (tradingtime / np.max(tradingtime))
 
+            # 2) Fractional Brownian Motion
+            fbm = FractionalBrownianMotion(hurst=self.h1)
+            simulacion_fbm = fbm._sample_fractional_brownian_motion(npts - 1)
+
+            # 3) Construct log-prices
+            xt_simulados = simulacion_fbm
+            # Scale from final known price in the original dataset, if desired
+            # or from an initial price (the user logic may differ).
+            # Here we do from last known price:
+            precio_final = self.Price[-1] * np.exp(xt_simulados)
+
+            # Store
             almacen_tradingtime.append(tradingtime)
-            almacen_xt.append(xtsimulados)
+            almacen_xt.append(xt_simulados)
             almacen_precio_final.append(precio_final)
 
-        # Data Visualization
-        def plot_simulation(x_values, y_values, x_label, y_label):
-            _, ax = plt.subplots(figsize=(12, 8))
-            for x, y in zip(x_values, y_values):
-                ax.plot(x, y, lw=0.5, alpha=0.1)
-            ax.plot(x_values[n // 2], y_values[n // 2], lw=0.5, alpha=1, color="b")
-            ax.set_xlabel(x_label, fontsize=22)
-            ax.set_ylabel(y_values, fontsize=22)
-            ax.tick_params(axis="both", labelsize=22)
-            ax.grid(True, linestyle="-.")
+        # 4) Plot: arrays of all simulations
+        def plot_simulation(x_values_list, y_values_list, x_label, y_label):
+            """
+            Utility function to plot multiple simulation paths.
+            """
+            plt.style.use("default")
+            fig, ax = plt.subplots(figsize=(12, 8))
+            for x_vals, y_vals in zip(x_values_list, y_values_list):
+                ax.plot(x_vals, y_vals, lw=0.5, alpha=0.1, color="black")
+
+            # Highlight one path in blue for better visibility
+            mid_index = n // 2
+            ax.plot(
+                x_values_list[mid_index],
+                y_values_list[mid_index],
+                lw=1.0,
+                alpha=1,
+                color="blue",
+                label="One Example Path",
+            )
+
+            ax.set_xlabel(x_label, fontsize=16)
+            ax.set_ylabel(y_label, fontsize=16)
+            ax.tick_params(axis="both", labelsize=14)
+            ax.grid(True, linestyle="--", alpha=0.7)
+            plt.legend(fontsize=14)
             plt.tight_layout()
             plt.show()
 
+        # Plot X(t) vs Real (integer) time for each simulation
         plot_simulation(almacen_tradingtime, almacen_xt, "Real Time (days)", "X(t)")
+
+        # Alternatively, we can also plot the tradingtime vs. index
+        # but the user logic may differ. For demonstration:
         plot_simulation(
-            range(2**kmax), almacen_tradingtime, "Real Time (days)", "X(t)"
+            [range(npts)] * n, almacen_tradingtime, "Integer Steps", "Trading Time"
         )
 
-        return almacen_tradingtime, almacen_precio_final, almacen_xt
+        if result:
+            return almacen_tradingtime, almacen_precio_final, almacen_xt
 
-    def analizadorprobabilidades(self, dia, almacen_tradingtime, almacen_precio_final):
+    def analizadorprobabilidades(self, day, almacen_tradingtime, almacen_precio_final):
         """
-        This function analyzes the probabilities for each output of the simulacion2 method.
-        n represents the number of simulations carried out in simulacion2.
+        Analyzes and plots the distribution of simulated prices at a specific
+        'day' (in real/physical time) across all n simulations. This effectively
+        shows how the random 'time deformation' changes the distribution of
+        prices at the chosen real day.
+
+        Parameters
+        ----------
+        day : float
+            The real (physical) time at which we want to evaluate the price distribution.
+        almacen_tradingtime : list of np.ndarrays
+            Each entry is the multifractal trading time array for one simulation.
+        almacen_precio_final : list of np.ndarrays
+            Each entry is the array of simulated prices for one simulation.
+
+        Returns
+        -------
+        None. Displays a histogram with a Gaussian overlay.
         """
-
-        # Calculate probability density functions for each time unit. We make use of Laplace's rule.
-        # Specifically, we compute histograms for each time point.
-
-        # 1. Generate lists for histograms:
-        # The key challenge here is that we are composing functions, and the time assigned to
-        # each price with the same index i of each sublist isn't the same. This depends on each one's
-        # transition function. Therefore, we perform linear interpolation for each pair of
-        # almacen_precio_final[i] and almacen_tradingtime[i] and proceed accordingly.
-
-        # Obtain the prices for the specific day (real) while accommodating time deformation due to trading time.
-        # Linear interpolation is employed (although other interpolation methods could be better).
-        # The interpolation is computationally the most efficient way to compose functions:
+        # Number of simulations
         n = len(almacen_tradingtime)
-        # Parte las líneas muy largas en varias líneas y utiliza el zip que te he dicho antes:
-        precios_serios = [
-            np.interp(dia, trading_time, precio_final)
-            for trading_time, precio_final in zip(
-                almacen_tradingtime, almacen_precio_final
-            )
-            if np.interp(dia, trading_time, precio_final)
-        ]
-        hist, bins = np.histogram(precios_serios, bins=50, density=True)
-        media = np.mean(precios_serios)
-        stdd = np.std(precios_serios)
 
-        # Generate a Gaussian distribution for comparison:
-        x = np.linspace(bins[0] - 1, bins[-1] + 1, 10000)
-        y = stats.norm.pdf(x, media, stdd)
+        # For each simulation i, we do a linear interpolation to find
+        # the price at "day" in real time. This is effectively
+        # P_i( day ), given the time deformation stored in almacen_tradingtime[i].
+        precios_en_dia = []
+        for t_array, p_array in zip(almacen_tradingtime, almacen_precio_final):
+            # Interpolation can fail if 'day' < t_array[0] or 'day' > t_array[-1].
+            # One might want to clamp or skip. We assume day is within [0, 2^kmax].
+            # np.interp returns a float, so we append it directly.
+            val = np.interp(day, t_array, p_array)
+            precios_en_dia.append(val)
 
-        # Plotting the histogram and Gaussian distribution:
+        # Build the histogram
+        hist, bins = np.histogram(precios_en_dia, bins=50, density=True)
+        media = np.mean(precios_en_dia)
+        stdd = np.std(precios_en_dia)
+
+        # Gaussian for reference
+        xvals = np.linspace(bins[0] - 1, bins[-1] + 1, 1000)
+        yvals = stats.norm.pdf(xvals, media, stdd)
+
+        # Plot the histogram + Gaussian overlay
+        plt.style.use("default")
         fig, ax = plt.subplots(figsize=(12, 8))
         ax.hist(
-            precios_serios,
+            precios_en_dia,
             bins=50,
             alpha=0.5,
             density=True,
             edgecolor="black",
             label="Actual Distribution",
         )
-        ax.plot(x, y, color="red", linewidth=2, label="Gaussian Distribution (CLT)")
+        ax.plot(xvals, yvals, color="red", linewidth=2, label="Gaussian (Reference)")
 
-        # Display mean and standard deviation:
-        textbox_text = f"Mean: {media:.2f}\nStandard Deviation: {stdd:.2f}"
+        # Display mean and standard deviation in a text box
+        textbox_text = f"Mean: {media:.2f}\nStd Dev: {stdd:.2f}"
         ax.text(
             0.95,
             0.95,
             textbox_text,
             transform=ax.transAxes,
-            fontsize=22,
+            fontsize=14,
             verticalalignment="top",
             horizontalalignment="right",
             bbox=dict(facecolor="white", edgecolor="black", alpha=0.7),
         )
 
-        # Label x and y axis:
-        ax.set_xlabel(f"P({dia}) ($)", fontsize=22)
-        ax.set_ylabel("Probability Density", fontsize=22)
+        ax.set_xlabel(f"P({day}) ($)", fontsize=16)
+        ax.set_ylabel("Probability Density", fontsize=16)
+        ax.tick_params(axis="both", which="major", labelsize=14)
+        ax.grid(axis="y", linestyle="--", alpha=0.7)
+        ax.legend(loc="upper right", fontsize=14)
 
-        # Set tick size:
-        ax.tick_params(axis="both", which="major", labelsize=22)
-
-        # Adding horizontal grid lines:
-        ax.grid(axis="y")
-
-        # Add legend:
-        plt.legend(loc="center right", fontsize=18)
-
-        # Ensure a clean layout:
         plt.tight_layout()
-
-        # Display the plot:
         plt.show()

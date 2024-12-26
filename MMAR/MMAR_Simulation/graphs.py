@@ -1,46 +1,45 @@
-# Revisar los paquetes que no se usan. En este caso, Pandas.
-# Esto debería decírtelo automáticamente tu IDE
 import numpy as np
-import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 
 
 class Graphs:
-    # 2 problemas veo en la siguiente línea:
-    #     1. deltas=np.array([x for x in range(1, 1000)] puede reescribirse como np.array(range(1, 1000)).
-    #        Mejor aún, se puede usar np.arange
-    #     2. Mucho ojo con poner objetos mutables como parámetros por defecto. Malísima práctica:
-    #     https://florimond.dev/en/posts/2018/08/python-mutable-defaults-are-the-source-of-all-evil/
+    """
+    This class provides basic data handling and plotting functionality
+    for a financial time series, including:
+    - Price plot
+    - Relative price change plot
+    - Log-price transform X(t) plot
+
+    Parameters
+    ----------
+    dataset : pd.DataFrame or np.ndarray
+        The entire dataset containing time and price information.
+    time : str
+        Column name or key representing the time index in 'dataset'.
+    price : str
+        Column name or key representing the asset's price in 'dataset'.
+    a : float, optional
+        Lower bound for q (used by inheriting classes), default is 0.
+    b : float, optional
+        Upper bound for q (used by inheriting classes), default is 5.
+    npoints : int, optional
+        Number of q-values to sample (used by inheriting classes), default is 20.
+    deltas : list or np.ndarray, optional
+        Array of time intervals for partition function computations.
+        If None, uses np.arange(1, 1000).
+    kmax : int, optional
+        Maximum resolution parameter for further multifractal analysis, default is 13.
+    """
+
     def __init__(
         self, dataset, time, price, a=0, b=5, npoints=20, deltas=None, kmax=13
     ):
-        """
-        Initialize the Graphs class with the given parameters.
-
-        time: String indicating the column name representing the time interval
-        price: String indicating the column name representing the asset price
-        deltas: nd.array indicating which are going to be the intervals from where
-                is going to be stracted the multifractal characteristics.
-
-        The constructor allows for importing multiple prices from a single Excel file,
-        allowing flexibility in data manipulation.
-
-        The instance attributes:
-            - dataset: The entire DataFrame
-            - date: Numpy array of temporal values as dates
-            - days: Numpy array of temporal values in days
-            - Price: Numpy array of asset prices
-            - X_t: Numpy array representing X(t)
-            - variacionprices: Relative price variation
-        """
-        # Falta homogeneidad en los nombres. O todo en español, o todo en inglés.
-
+        # Validate or set deltas
         if deltas is None:
             deltas = np.arange(1, 1000)
-        # Initialize attributes
-        # Llamar dataset a una variable no significa nada. Podría llamarse 'datos' o cualquier otro
-        # nombre más descriptivo
+
+        # Store parameters
         self.dataset = dataset
         self.time = time
         self.price = price
@@ -50,30 +49,25 @@ class Graphs:
         self.deltas = deltas
         self.kmax = kmax
 
-        def __post_init__(self):
-            # Convert columns to numpy arrays
-            self.date = self.dataset[time].to_numpy()
-            # Se puede reescribir (como en la línea 8)
-            self.days = np.array([x for x in range(len(self.date))])
-            # Nombres de los atributos siempre en minúscula. Intenta seguir la guía de estilo PEP8
-            self.Price = self.dataset[price].to_numpy()
-            # Calculate X(t) values
-            self.X_t = np.log(self.Price) - np.log(self.Price[0])
+        # Convert columns to numpy arrays
+        # For the time column
+        self.date = self.dataset[self.time].to_numpy()
+        # Numeric index of days
+        self.days = np.arange(len(self.date))
+        # Price array
+        self.Price = self.dataset[self.price].to_numpy()
+        # Log-price transform
+        self.X_t = np.log(self.Price) - np.log(self.Price[0])
 
-            # Calculate price variation
-            # Renombrar (guía PEP8)
-            self.variacionprices = self.graf_Price_change(deltat=1, result=True, graf=False)
+        # Compute and store the relative price variation as a default
+        # (using deltat=1, but not plotting)
+        self.variacionprices = self.graf_Price_change(deltat=1, result=True, graf=False)
 
     def grafPrice(self):
         """
-        Plot the asset price.
+        Plot the asset price over time.
         """
-
-        # Styling and figure setup
         plt.style.use("default")
-        # Cuando una variable no se usa, a veces es mejor enfatizarlo.
-        # En este caso, por ejemplo, fig no se usa. Yo lo reescribiría como:
-        # _, ax = plt.subplots(figsize=(12, 8))
         fig, ax = plt.subplots(figsize=(12, 8))
 
         # Plot data
@@ -119,33 +113,43 @@ class Graphs:
             self.date, self.Price, where=self.Price >= 0, color="green", alpha=0.4
         )
 
-        # Show the plot
         plt.tight_layout()
         plt.show()
 
     def graf_Price_change(self, deltat=1, result=False, graf=True):
         """
-        Plot the relative change in asset prices.
-        """
+        Calculate and optionally plot the relative change in asset prices.
 
-        # Calculate price variation
+        Parameters
+        ----------
+        deltat : int
+            Step size (in indices) for computing price differences.
+        result : bool
+            If True, returns the raw price-difference array.
+        graf : bool
+            If True, produces the plot.
+
+        Returns
+        -------
+        variacion_prices1 : np.ndarray (if result=True)
+            Array of absolute price differences over the chosen deltat.
+        """
+        # 1) Compute price differences
         variacion_prices1 = self.Price[deltat::deltat] - self.Price[:-deltat:deltat]
 
-        # Calculate the average between two prices
-        # Más elegante: media = (price[:-1] + price[1:])/2
-        media = [
-            (self.Price[i] + self.Price[i + 1]) / 2 for i in range(len(self.Price) - 1)
-        ]
+        # 2) Compute the average of consecutive prices to scale the difference
+        #    so that the result is a relative difference
+        media = (self.Price[:-1] + self.Price[1:]) / 2.0
+        # Ensure we only use the portion that matches variacion_prices1 length
+        media = media[: len(variacion_prices1)]
 
-        # Calculate relative price variation
-        # Más elegante: variacion_prices = variacion_prices1/media[:len(variacion_prices1)]
-        variacion_prices = [
-            variacion_prices1[i] / media[i] for i in range(len(variacion_prices1))
-        ]
+        # 3) Relative price variation
+        variacion_prices = variacion_prices1 / media
 
-        # Plotting if graf is True
+        # 4) Plot if requested
         if graf:
             fig, ax = plt.subplots(figsize=(24, 5))
+            # The x-axis: days up to len(variacion_prices)
             ax.plot(self.days[:-1], variacion_prices, linewidth=0.5)
 
             ax.xaxis.set_major_locator(plt.MaxNLocator(6))
@@ -171,18 +175,16 @@ class Graphs:
             plt.tight_layout()
             plt.show()
 
-        # Return the calculated values if result is True
         if result:
             return variacion_prices1
 
     def grafX_t(self):
         """
-        Plot the function X(t) for the asset price.
+        Plot the function X(t) for the asset price: X(t) = ln(Price(t)) - ln(Price(0)).
         """
-
         plt.style.use("default")
         fig, ax = plt.subplots(figsize=(12, 8))
-        ax.plot(self.date, self.X_t, color="black", linewidth=1.5, label="Price")
+        ax.plot(self.date, self.X_t, color="black", linewidth=1.5, label="X(t)")
 
         ax.xaxis.set_major_locator(plt.MaxNLocator(6))
         date_fmt = mdates.DateFormatter("%Y-%m-%d")
@@ -199,8 +201,12 @@ class Graphs:
             color="grey",
         )
 
-        ax.set_title(f"{self.price} Price History", fontsize=16, fontweight="bold")
-        ax.set_ylabel("X_t ($)", fontsize=12, fontweight="bold")
+        ax.set_title(
+            f"{self.price} Price History: X(t) = ln(Price) - ln(Price[0])",
+            fontsize=16,
+            fontweight="bold",
+        )
+        ax.set_ylabel("X(t)", fontsize=12, fontweight="bold")
         ax.set_xlabel("Time (ET)", fontsize=12, fontweight="bold")
 
         closing_time = "16:00:00"
