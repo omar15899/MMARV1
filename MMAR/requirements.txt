@@ -7,6 +7,7 @@ pandas
 
 # Optimization and Statistics Libraries
 scipy
+statsmodels
 
 # Visualization Libraries
 matplotlib
