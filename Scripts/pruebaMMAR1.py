@@ -17,12 +17,12 @@ if __name__ == "__main__":
     Lockheed = MMAR(df, "Date", "Close", a=0, b=3, npoints=10)
     # Lockheed.grafPrice()
     # Lockheed.grafX_t()
-    Lockheed.graf_Price_change()
+    # Lockheed.graf_Price_change()
     Lockheed.partition_functions()
     Lockheed.compute_tau_and_alpha()
     Lockheed.multifractal_measure_rand(graf1=True)
 
     # # For initialiting the simulation:
 
-    # x, y, z = Lockheed.simulacion(n=100)
-    # Lockheed.analizadorprobabilidades(4000, x, y)
+    x, y, z = Lockheed.simulacion(n=10000, result=True)
+    Lockheed.analizadorprobabilidades(4000, x, y)

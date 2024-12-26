@@ -1,12 +1,8 @@
-import random
 import numpy as np
-import pandas as pd
-import scipy.optimize
 from scipy.interpolate import UnivariateSpline
 import scipy.stats as stats
 from scipy.stats import t
 import matplotlib.pyplot as plt
-from matplotlib.lines import Line2D
 from .graphs import Graphs
 
 
@@ -260,14 +256,14 @@ class MultifractalCharacteristics(Graphs):
                     label=rf"$q = {q:.2f}$",
                     color=colors[idx % len(colors)],
                 )
-            # ax.set_title(
-            #     r"Unnormalized Partition Function $\log_{10}(S_q(\Delta t))$ vs. $\log_{10}(\Delta t)$",
-            #     fontsize=14,
-            #     fontweight="bold",
-            # )
-            # ax.set_ylabel(
-            #     r"$\log_{10}\bigl(S_q(\Delta t)\bigr)$", fontsize=12, fontweight="bold"
-            # )
+            ax.set_title(
+                r"Unnormalized Partition Function $\log_{10}(S_q(\Delta t))$ vs. $\log_{10}(\Delta t)$",
+                fontsize=14,
+                fontweight="bold",
+            )
+            ax.set_ylabel(
+                r"$\log_{10}\left(S_q(\Delta t)\right)$", fontsize=12, fontweight="bold"
+            )
             ax.set_xlabel(r"$\log_{10}(\Delta t)$", fontsize=12, fontweight="bold")
             ax.grid(
                 which="both",
