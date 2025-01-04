@@ -16,3 +16,4 @@ venv/
 *.txt
 
 .hidden/
+*.DS_Store

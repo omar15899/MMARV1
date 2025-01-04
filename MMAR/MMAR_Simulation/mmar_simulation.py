@@ -1,8 +1,9 @@
 import numpy as np
 import matplotlib.pyplot as plt
+import scipy.stats as stats
 from stochastic.processes.continuous import FractionalBrownianMotion
 from .multifractalcharacteristics import MultifractalCharacteristics
-import scipy.stats as stats
+from ..Multifractal_Measure.multifractal_measure_rand import BinomialMultifractalRand
 
 
 class MMAR(MultifractalCharacteristics):
@@ -46,7 +47,7 @@ class MMAR(MultifractalCharacteristics):
     def path_simulation(self, grafs=False, results=False):
         """
         Simulate a single price path using:
-        1) A multifractal time deformation via multifractal_measure_rand().
+        1) A multifractal time deformation from BinomialMultifractalRand (lognormal base 2).
         2) Fractional Brownian motion increments in 'physical' time.
 
         Parameters
@@ -61,32 +62,41 @@ class MMAR(MultifractalCharacteristics):
         tradingtime : np.ndarray, optional
             The (normalized) multifractal trading time if results=True.
         """
-        # Number of data points is 2^kmax
-        kmax = self.kmax
-        npts = 2**kmax
+        # 1) Generate the multifractal measure
+        binom = BinomialMultifractalRand()
+        npts = 2**self.kmax
+        tradingtime = binom.multifractal_measure_rand2(
+            b=2,
+            m=1,
+            kmax=self.kmax,
+            falpha=self.falpha,
+            derivada=self.derivada,
+            h1=self.h1,
+            Price=self.Price,
+            masas1=False,
+            masas2=True,
+            coef=False,
+            graf1=False,
+            cumsum=True,
+        )
 
-        # 1) Compute multifractal trading time via cumsum
-        #    This is the time deformation function
-        tradingtime = self.multifractal_measure_rand(cumsum=True)
-        # Normalize and scale to the range [0, 2^kmax]
+        # Normalize trading time to range [0, 2^kmax]
         tradingtime = npts * (tradingtime / np.max(tradingtime))
 
-        # 2) Fractional Brownian Motion (FBM)
+        # 2) Fractional Brownian Motion increments
         fbm = FractionalBrownianMotion(hurst=self.h1)
-        # The 'stochastic' package uses _sample_fractional_brownian_motion(...)
-        # internally for generating the FBM increments
         simulacion_fbm = fbm._sample_fractional_brownian_motion(npts - 1)
 
-        # 3) Construct simulated log-prices: X(t) = increments of FBM
+        # 3) Construct simulated log-prices
         xt_simulados = simulacion_fbm
-        # Use self.Price[0] as initial price
+        # For the initial price, we take self.Price[0]
         precio_final = self.Price[0] * np.exp(xt_simulados)
 
         # 4) Optionally plot
         if grafs:
             plt.style.use("default")
 
-            # Plot the multifractal trading time vs. integer steps
+            # (a) Trading time vs integer index
             plt.figure(figsize=(10, 4))
             plt.plot(range(npts), tradingtime, label="Multifractal Trading Time")
             plt.xlabel("Integer Index")
@@ -96,7 +106,7 @@ class MMAR(MultifractalCharacteristics):
             plt.tight_layout()
             plt.show()
 
-            # Plot price vs. multifractal time
+            # (b) Price vs trading time
             plt.figure(figsize=(10, 4))
             plt.plot(tradingtime, precio_final, label="Price (Deformed Time)")
             plt.title("Price under Multifractal Time Deformation")
@@ -107,7 +117,7 @@ class MMAR(MultifractalCharacteristics):
             plt.tight_layout()
             plt.show()
 
-            # Plot price vs. integer steps
+            # (c) Price vs integer steps
             plt.figure(figsize=(10, 4))
             plt.plot(range(npts), precio_final, label="Price (Physical Time)")
             plt.title("Price in Physical (Integer) Time")
@@ -118,7 +128,7 @@ class MMAR(MultifractalCharacteristics):
             plt.tight_layout()
             plt.show()
 
-            # Plot increments of price
+            # (d) Price increments
             plt.figure(figsize=(10, 4))
             plt.plot(
                 range(npts - 1),
@@ -137,10 +147,10 @@ class MMAR(MultifractalCharacteristics):
         if results:
             return tradingtime
 
-    def simulacion(self, n=1000, result=False):
-        """
+    def simulacion(self, n=1000, result=False, show_plots=True):
+        r"""
         Monte Carlo simulation of n price paths, each constructed by:
-        1) Generating a multifractal trading time.
+        1) Generating a multifractal trading time (lognormal base 2).
         2) Generating fractional Brownian motion increments.
         3) Composing them to obtain final prices.
 
@@ -150,6 +160,8 @@ class MMAR(MultifractalCharacteristics):
             Number of simulated paths (default=1000).
         result : bool
             If True, return the arrays with the simulated paths.
+        show_plots : bool
+            If True, plot the ensemble of paths.
 
         Returns
         -------
@@ -158,81 +170,69 @@ class MMAR(MultifractalCharacteristics):
             - almacen_precio_final: list of final price arrays for each of n simulations
             - almacen_xt : list of FBM increments arrays for each of n simulations
         """
-        kmax = self.kmax
-        npts = 2**kmax
+        binom = BinomialMultifractalRand()
+        npts = 2**self.kmax
 
         almacen_tradingtime = []
         almacen_xt = []
         almacen_precio_final = []
 
         for _ in range(n):
-            # 1) Generate multifractal time (unnormalized) + normalization
-            tradingtime = self.multifractal_measure_rand(cumsum=True)
+            # 1) Generate multifractal time
+            tradingtime = binom.multifractal_measure_rand2(
+                b=2,
+                m=1,
+                kmax=self.kmax,
+                falpha=self.falpha,
+                derivada=self.derivada,
+                h1=self.h1,
+                Price=self.Price,
+                masas1=False,
+                masas2=True,
+                coef=False,
+                graf1=False,
+                cumsum=True,
+            )
+            # Scale
             tradingtime = npts * (tradingtime / np.max(tradingtime))
 
-            # 2) Fractional Brownian Motion
+            # 2) Generate FBM increments
             fbm = FractionalBrownianMotion(hurst=self.h1)
             simulacion_fbm = fbm._sample_fractional_brownian_motion(npts - 1)
 
-            # 3) Construct log-prices
-            xt_simulados = simulacion_fbm
-            # Scale from final known price in the original dataset, if desired
-            # or from an initial price (the user logic may differ).
-            # Here we do from last known price:
-            precio_final = self.Price[-1] * np.exp(xt_simulados)
+            # 3) Compute final prices
+            xt_sim = simulacion_fbm
+            # We use the last known price as reference
+            precio_final = self.Price[-1] * np.exp(xt_sim)
 
-            # Store
             almacen_tradingtime.append(tradingtime)
-            almacen_xt.append(xt_simulados)
+            almacen_xt.append(xt_sim)
             almacen_precio_final.append(precio_final)
 
-        # 4) Plot: arrays of all simulations
-        def plot_simulation(x_values_list, y_values_list, x_label, y_label):
-            """
-            Utility function to plot multiple simulation paths.
-            """
-            plt.style.use("default")
-            fig, ax = plt.subplots(figsize=(12, 8))
-            for x_vals, y_vals in zip(x_values_list, y_values_list):
-                ax.plot(x_vals, y_vals, lw=0.5, alpha=0.1, color="black")
-
-            # Highlight one path in blue for better visibility
-            mid_index = n // 2
-            ax.plot(
-                x_values_list[mid_index],
-                y_values_list[mid_index],
-                lw=1.0,
-                alpha=1,
-                color="blue",
-                label="One Example Path",
+        if show_plots:
+            self._plot_simulation_ensemble(
+                almacen_tradingtime, almacen_xt, "Real Time (days)", "X(t)", n
             )
-
-            ax.set_xlabel(x_label, fontsize=16)
-            ax.set_ylabel(y_label, fontsize=16)
-            ax.tick_params(axis="both", labelsize=14)
-            ax.grid(True, linestyle="--", alpha=0.7)
-            plt.legend(fontsize=14)
-            plt.tight_layout()
-            plt.show()
-
-        # Plot X(t) vs Real (integer) time for each simulation
-        plot_simulation(almacen_tradingtime, almacen_xt, "Real Time (days)", "X(t)")
-
-        # Alternatively, we can also plot the tradingtime vs. index
-        # but the user logic may differ.
-        plot_simulation(
-            [range(npts)] * n, almacen_tradingtime, "Integer Steps", "Trading Time"
-        )
+            self._plot_simulation_ensemble(
+                [range(npts)] * n,
+                almacen_tradingtime,
+                "Integer Steps",
+                "Trading Time",
+                n,
+            )
 
         if result:
             return almacen_tradingtime, almacen_precio_final, almacen_xt
 
     def analizadorprobabilidades(self, day, almacen_tradingtime, almacen_precio_final):
-        """
+        r"""
         Analyzes and plots the distribution of simulated prices at a specific
         'day' (in real/physical time) across all n simulations. This effectively
         shows how the random 'time deformation' changes the distribution of
         prices at the chosen real day.
+
+        Additionally, checks for 'fat tails' by comparing the empirical
+        distribution to a Gaussian, plotting the difference in log-scale.
 
         Parameters
         ----------
@@ -245,45 +245,37 @@ class MMAR(MultifractalCharacteristics):
 
         Returns
         -------
-        None. Displays a histogram with a Gaussian overlay.
+        None. Displays a histogram with a Gaussian overlay and a log-plot for tail comparison.
         """
-        # Number of simulations
         n = len(almacen_tradingtime)
 
-        # For each simulation i, we do a linear interpolation to find
-        # the price at "day" in real time. This is effectively
-        # P_i( day ), given the time deformation stored in almacen_tradingtime[i].
+        # Interpolate each path at the chosen real day
         precios_en_dia = []
         for t_array, p_array in zip(almacen_tradingtime, almacen_precio_final):
-            # Interpolation can fail if 'day' < t_array[0] or 'day' > t_array[-1].
-            # One might want to clamp or skip. We assume day is within [0, 2^kmax].
-            # np.interp returns a float, so we append it directly.
             val = np.interp(day, t_array, p_array)
             precios_en_dia.append(val)
 
-        # Build the histogram
-        hist, bins = np.histogram(precios_en_dia, bins=50, density=True)
+        # Basic stats
         media = np.mean(precios_en_dia)
         stdd = np.std(precios_en_dia)
 
-        # Gaussian for reference
-        xvals = np.linspace(bins[0] - 1, bins[-1] + 1, 1000)
-        yvals = stats.norm.pdf(xvals, media, stdd)
-
-        # Plot the histogram + Gaussian overlay
+        # (1) Plot histogram + Gaussian
         plt.style.use("default")
         fig, ax = plt.subplots(figsize=(12, 8))
-        ax.hist(
+        hist_vals, bins, _ = ax.hist(
             precios_en_dia,
             bins=50,
             alpha=0.5,
             density=True,
             edgecolor="black",
-            label="Actual Distribution",
+            label="Empirical Distribution",
         )
-        ax.plot(xvals, yvals, color="red", linewidth=2, label="Gaussian (Reference)")
 
-        # Display mean and standard deviation in a text box
+        xvals = np.linspace(bins[0] - 1, bins[-1] + 1, 1000)
+        yvals = stats.norm.pdf(xvals, media, stdd)
+        ax.plot(xvals, yvals, color="red", linewidth=2, label="Gaussian Reference")
+
+        # Mean and std annotation
         textbox_text = f"Mean: {media:.2f}\nStd Dev: {stdd:.2f}"
         ax.text(
             0.95,
@@ -301,6 +293,104 @@ class MMAR(MultifractalCharacteristics):
         ax.tick_params(axis="both", which="major", labelsize=14)
         ax.grid(axis="y", linestyle="--", alpha=0.7)
         ax.legend(loc="upper right", fontsize=14)
+        plt.title(f"Distribution of Prices at Real Time = {day}", fontsize=14)
+        plt.tight_layout()
+        plt.show()
 
+        # (2) Check for fat tails:
+        # One approach is to compare the log of the empirical survival function with
+        # the log of the Gaussian survival function.
+        # We can do a simple tail index check, or just do a Q-Q plot as well.
+        self._check_fat_tails(precios_en_dia, media, stdd)
+
+    def _plot_simulation_ensemble(
+        self, x_values_list, y_values_list, x_label, y_label, n
+    ):
+        """
+        Utility function to plot multiple simulation paths in a single figure.
+        """
+        plt.style.use("default")
+        fig, ax = plt.subplots(figsize=(12, 8))
+        for x_vals, y_vals in zip(x_values_list, y_values_list):
+            ax.plot(x_vals, y_vals, lw=0.5, alpha=0.1, color="black")
+
+        # Highlight one path in blue for better visibility
+        mid_index = n // 2
+        ax.plot(
+            x_values_list[mid_index],
+            y_values_list[mid_index],
+            lw=1.0,
+            alpha=1,
+            color="blue",
+            label="One Example Path",
+        )
+
+        ax.set_xlabel(x_label, fontsize=16)
+        ax.set_ylabel(y_label, fontsize=16)
+        ax.tick_params(axis="both", labelsize=14)
+        ax.grid(True, linestyle="--", alpha=0.7)
+        plt.legend(fontsize=14)
+        plt.tight_layout()
+        plt.show()
+
+    def _check_fat_tails(self, data, mean_val, std_val):
+        """
+        Check for fat tails by comparing the empirical tail distribution
+        to that of a normal distribution. We'll produce a Q-Q plot and
+        a log-survival function plot.
+
+        data : array-like
+            The sample of prices at a given time.
+        mean_val : float
+            Mean of the data.
+        std_val : float
+            Std dev of the data.
+        """
+        sorted_data = np.sort(data)
+        n = len(sorted_data)
+        # Q-Q plot vs normal
+        theoretical_q = stats.norm.ppf(
+            (np.arange(n) + 0.5) / n, loc=mean_val, scale=std_val
+        )
+
+        # (A) Q-Q plot
+        plt.figure(figsize=(8, 6))
+        plt.plot(
+            theoretical_q, sorted_data, "o", markersize=3, alpha=0.5, label="Data Q-Q"
+        )
+        min_q, max_q = min(theoretical_q), max(theoretical_q)
+        plt.plot(
+            [min_q, max_q],
+            [min_q, max_q],
+            color="red",
+            linestyle="--",
+            label="Perfect Normal",
+        )
+        plt.title("Q-Q Plot (Data vs. Normal)")
+        plt.xlabel("Theoretical Quantiles")
+        plt.ylabel("Empirical Quantiles")
+        plt.legend()
+        plt.grid(True, linestyle="--", alpha=0.7)
+        plt.tight_layout()
+        plt.show()
+
+        # (B) Survival function (SF): P(X > x). We'll compare log(SF_data) vs. log(SF_normal).
+        # Empirical survival
+        sf_data = 1.0 - np.arange(1, n + 1) / n
+        # Normal SF for sorted_data
+        sf_norm = 1.0 - stats.norm.cdf(sorted_data, loc=mean_val, scale=std_val)
+
+        # Plot in log scale
+        plt.figure(figsize=(8, 6))
+        plt.plot(
+            sorted_data, sf_data, "o", markersize=3, alpha=0.5, label="Empirical SF"
+        )
+        plt.plot(sorted_data, sf_norm, color="red", alpha=0.7, label="Normal SF")
+        plt.yscale("log")  # log scale on y
+        plt.title("Survival Function Comparison (Log Scale)")
+        plt.xlabel("Price")
+        plt.ylabel("P(X > x) (log scale)")
+        plt.grid(True, linestyle="--", alpha=0.7)
+        plt.legend()
         plt.tight_layout()
         plt.show()

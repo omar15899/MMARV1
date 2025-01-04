@@ -4,6 +4,7 @@ import scipy.stats as stats
 from scipy.stats import t
 import matplotlib.pyplot as plt
 from .graphs import Graphs
+from ..Multifractal_Measure.multifractal_measure_rand import BinomialMultifractalRand
 
 
 class MultifractalCharacteristics(Graphs):
@@ -21,7 +22,7 @@ class MultifractalCharacteristics(Graphs):
     def __init__(
         self, dataset, time, price, a=0, b=5, npoints=20, deltas=None, kmax=13
     ):
-        """
+        r"""
         Parameters
         ----------
         dataset : pd.DataFrame or np.ndarray
@@ -457,134 +458,52 @@ class MultifractalCharacteristics(Graphs):
     def multifractal_measure_rand(
         self, b=2, m=1, masas1=False, masas2=True, coef=False, graf1=False, cumsum=False
     ):
-        r"""
-        Generate a multifractal measure consistent with lognormal parameters \(\lambda\) and \(\sigma^2\).
-        This code is based on random cascades along a dyadic partition.
+        """
+        Generates a multifractal measure using the 'BinomialMultifractalRand' class.
+        This method keeps the same parameters and structure as other parts of the
+        code to stay compatible.
 
         Parameters
         ----------
-        b : int
-            Partition base, typically 2 for dyadic.
-        m : int
-            Number of small subdivisions in each interval for plotting.
-        masas1 : bool
-            Toggle for one method of random measure generation.
-        masas2 : bool
-            Toggle for another method of random measure generation.
-        coef : bool
-            If True, returns the entire measure and parameters.
-        graf1 : bool
-            If True, plots the resulting measure.
-        cumsum : bool
+        b : int (default=2)
+            Number of divisions in each step (e.g., b=2 for binary cascades).
+        m : int (default=1)
+            Number of points to draw in each small section of the graph.
+        masas1 : bool (default=False)
+            If True, uses an alternative way to calculate weights for the measure.
+        masas2 : bool (default=True)
+            If True, uses a lognormal method to calculate weights.
+        coef : bool (default=False)
+            If True, returns extra data about the measure (like lambda and variance).
+        graf1 : bool (default=False)
+            If True, shows a graph of the measure.
+        cumsum : bool (default=False)
             If True, returns the cumulative sum of the measure.
 
         Returns
         -------
-        If coef=True:
-            (lista_general, lambdas, varianza)
-        If cumsum=True:
-            np.cumsum(lista_general[-1])
-        Otherwise:
-            None
-
-        Notes
-        -----
-        - \(\lambda = \alpha_0 / H\).
-        - \(\sigma^2 = 2(\lambda - 1)/\ln(2)\).
+        result : varies
+            - If `coef=True`, returns the measure and parameters (lambda, variance).
+            - If `cumsum=True`, returns the cumulative sum of the measure.
+            - If neither is True, returns None.
         """
-        kmax = self.kmax
+        # Create an instance of the class that handles the measure creation.
+        binomRand = BinomialMultifractalRand()
 
-        # 1) Extract alpha0 and H from the class attributes
-        #    alpha0 is the alpha that maximizes f(alpha)
-        #    lambdas, varianza are precomputed in __init__
-        alpha0 = self.alpha0
-        lambdas = self.lambdas
-        varianza = self.varianza
-
-        # 2) If varianza < 0, throw error
-        if varianza < 0:
-            raise ValueError(
-                "Variance must be non-negative in multifractal measure generation."
-            )
-
-        # 3) Generate the lognormal random variables with base 2 =>  2^(-Z), Z ~ Normal(lambdas, sqrt(varianza))
-        def lognormal_base2(lam, var):
-            normal_val = np.random.normal(loc=lam, scale=np.sqrt(var))
-            return 2 ** (-normal_val)
-
-        lista_general = []
-        for k in range(kmax):
-            lista_coeficientes = []
-            for _ in range(2**k):
-                if masas1:
-                    # Original snippet suggests dividing measure with
-                    # M = 2^-N / (2^-N + 2^N) pattern or something akin
-                    # This is a random approach, seldom used, but let's keep it for legacy.
-                    masas2 = False
-                    m00 = lognormal_base2(lambdas, varianza)
-                    # Convert to ratio
-                    m00 = m00 / (m00 + 1 / m00)
-                    m11 = 1 - m00
-                if masas2:
-                    # Two independent draws
-                    m00 = lognormal_base2(lambdas, varianza)
-                    m11 = lognormal_base2(lambdas, varianza)
-                lista_coeficientes.append(np.array([m00, m11]))
-            lista_general.append(lista_coeficientes)
-
-        # 4) Cascade step: multiply the random subdivided masses forward
-        #    Flatten the (k, k+1) structure
-        for i in range(len(lista_general) - 1):
-            # Flatten level i
-            lista_general[i] = [
-                item for sublist in lista_general[i] for item in sublist
-            ]
-            # Multiply corresponding items in level i+1
-            for j in range(len(lista_general[i])):
-                lista_general[i + 1][j] = lista_general[i][j] * lista_general[i + 1][j]
-
-        # Flatten the last list in lista_general (the measure at max level)
-        lista_general[-1] = np.array(
-            [item for sublist in lista_general[-1] for item in sublist]
+        # Use the method from the BinomialMultifractalRand class to create the measure.
+        # We pass in parameters from this class (like `self.kmax` or `self.h1`).
+        result = binomRand.multifractal_measure_rand2(
+            b=b,
+            m=m,
+            kmax=self.kmax,  # Maximum depth of the cascade
+            falpha=self.falpha,  # Values for the multifractal spectrum
+            derivada=self.derivada,  # The derivative of tau(q)
+            h1=self.h1,  # Hurst exponent
+            Price=self.Price,  # Price series data
+            masas1=masas1,
+            masas2=masas2,
+            coef=coef,
+            graf1=graf1,
+            cumsum=cumsum,
         )
-
-        # 5) Additional random factor if needed (Omega), as in original code
-        #    It's not fully standardized in typical MRA approaches, but we replicate logic here
-        media_omega = 1 / (2 ** (-lambdas * kmax))
-        # This might be a conceptual mismatch, but we keep it for code fidelity
-        if varianza < 0:
-            raise ValueError("Variance must be non-negative")
-
-        omega = np.random.normal(media_omega, np.sqrt(varianza), 2**kmax)
-        lista_general[-1] *= omega
-
-        # 6) Plot
-        if graf1:
-            intervals = [
-                np.linspace(i * b**-kmax, (i + 1) * b**-kmax, m) for i in range(b**kmax)
-            ]
-            # repeated measure
-            output = [val * np.ones(m) for val in lista_general[-1]]
-            x = np.array([point for sublist in intervals for point in sublist])
-            y = np.array([val for sublist in output for val in sublist])
-
-            # handle nan
-            if np.isnan(y).all():
-                raise ValueError("Array 'y' is entirely NaNs - generation problem?")
-
-            fig, ax = plt.subplots(figsize=(12, 4))
-            ax.plot(x, y, linewidth=0.8)
-            ax.set_xlim([0, 1])
-            ymax = np.nanmax(y)
-            ax.set_ylim([0, ymax + 0.1 * ymax])
-            ax.tick_params(axis="both", which="major", labelsize=12)
-            ax.grid(True, linestyle="--", alpha=0.7)
-            plt.title("Random Multifractal Measure", fontsize=14, fontweight="bold")
-            plt.show()
-
-        # 7) Return
-        if coef:
-            return lista_general, lambdas, varianza
-        if cumsum:
-            return np.cumsum(lista_general[-1])
-        # else None
+        return result

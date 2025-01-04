@@ -2,37 +2,24 @@ import numpy as np
 import matplotlib.pyplot as plt
 import stochastic
 
-# Nota: Se han eliminado importaciones no utilizadas (por ejemplo, scipy.optimize, statsmodels.api, etc.)
-#       Si se requieren para otras partes del proyecto, vuélvelas a introducir.
-#       También se ha sustituido 'import random' por 'np.random' para unificar la forma de generar aleatoriedad.
-
-# Nota 2: Hay referencias a una clase o módulo fractional_brownian_motion (p.ej. fractional_brownian_motion.FractionalBrownianMotion)
-#         que no está incluido en este snippet. Asumimos que se trata de un módulo propio o de un paquete externo.
-#         Aquí mantenemos la invocación, pero ten en cuenta que deberás importar o definir esa clase por tu cuenta.
-
 
 class BinomialMultifractalRand:
     """
-    Clase que contiene métodos para la generación y simulación de medidas multifractales
-    basadas en cascadas multiplicativas binomiales (y eventualmente lognormales).
-    Los métodos principales son:
+    This class contains methods to generate and simulate multifractal measures
+    based on binomial (or lognormal) multiplicative cascades.
 
-    1) multifractal_measure_rand1
-    2) multifractal_measure_rand2
-    3) simulacion
-
-    Atributos relevantes (ejemplo):
-    ------------------------------
+    Basic attributes (used in larger projects):
+    --------------------------------------------
     - kmax  : int
-        Profundidad máxima de la cascada (número de iteraciones).
+        Maximum depth of the cascade (number of iterations).
     - h1    : float
-        Parámetro de Hurst para un posible movimiento Browniano fraccionario.
+        Hurst exponent for potential fractional Brownian motion.
     - falpha: np.ndarray
-        Valores de la función f(α) (exponente de singularidad) para la medida multifractal.
+        Array with values of the function f(α) (singularity exponent).
     - derivada : np.ndarray
-        Derivada de τ(α) o array de exponentes α en un método de transformada de Legendre.
+        Array with the derivative of τ(q), which usually gives α(q).
     - Price : np.ndarray
-        Una serie (por ejemplo, de precios) para componer con la simulación.
+        Price series used to combine with the simulation.
     """
 
     @staticmethod
@@ -40,92 +27,84 @@ class BinomialMultifractalRand:
         kmax: int, b: int = 2, m: int = 5, coef: bool = True, graf1: bool = False
     ):
         """
-        Genera una medida multifractal (cascada multiplicativa) de tipo binomial
-        de profundidad kmax y partición b. Esta versión asume b=2 (binomial).
+        Generates a random binomial multiplicative cascade of depth kmax.
 
-        Parámetros
+        Parameters
         ----------
         kmax : int
-            Número de iteraciones para la cascada multiplicativa.
-        b : int, opcional (default=2)
-            Número de divisiones en cada iteración (b=2 → binomial, b>2 pendiente de implementar).
-        m : int, opcional (default=5)
-            Número de puntos que se toman en cada subintervalo para visualización.
-        coef : bool, opcional (default=True)
-            Si es True, la función retorna la lista de coeficientes (la imagen de la medida).
-        graf1 : bool, opcional (default=False)
-            Si es True, se grafica la medida multifractal renormalizada (densidad) para kmax.
+            Number of iterations for the cascade.
+        b : int, optional (default=2)
+            Number of divisions (b=2 => binomial cascade).
+        m : int, optional (default=5)
+            Points per subinterval for plotting.
+        coef : bool, optional (default=True)
+            If True, returns the final list of coefficients.
+        graf1 : bool, optional (default=False)
+            If True, plots the final cascade result.
 
-        Retorno
+        Returns
         -------
-        - list[list[np.ndarray]] o None
-            Si coef es True, se devuelve la lista de coeficientes en cascada.
-            Si coef es False o graf1 es True, no devuelve nada (solo grafica).
-
-        Notas
-        -----
-        - Actualmente solo implementado correctamente para b=2.
-        - Si se desea graficar, se muestra la densidad renormalizada 2^(kmax+1)*coef_i
-          en cada subintervalo.
+        list[list[np.ndarray]] or None
+            If coef=True, returns the list with the final cascade.
+            If coef=False, nothing is returned (only plotted if graf1 is True).
         """
-
-        # Por ahora, la implementación solo asume b=2
         if b != 2:
-            raise NotImplementedError("Esta función solo está lista para b=2.")
+            raise NotImplementedError("Only implemented for b=2 (binomial).")
 
-        # Paso 1: Generar la cascada de coeficientes aleatorios
-        lista_general = []
+        # 1) Build the cascade
+        lista_general = []  # This will hold all levels of the cascade
         for k in range(kmax):
-            lista_coeficientes = []
-            for _ in range(b**k):
-                m00 = np.random.random()  # cambia a np.random
-                m11 = 1.0 - m00
-                lista_coeficientes.append(np.array([m00, m11]))
-            lista_general.append(lista_coeficientes)
+            fila_coefs = []  # Coefficients at level k
+            for _ in range(b**k):  # b^k intervals at level k
+                m00 = np.random.random()  # Random weight for first part
+                m11 = 1.0 - m00  # Complement weight for second part
+                fila_coefs.append(np.array([m00, m11]))  # Add both weights
+            lista_general.append(fila_coefs)  # Add this level to the cascade
 
-        # Paso 2: Multiplicar en cascada
+        # 2) Multiply the coefficients across levels
         for i in range(len(lista_general) - 1):
-            # Aplanamos la lista en la iteración i
-            lista_general[i] = [x for sublist in lista_general[i] for x in sublist]
-            # Multiplicamos los coeficientes correspondientes
+            lista_general[i] = [
+                item for sublist in lista_general[i] for item in sublist
+            ]
             for j in range(len(lista_general[i])):
-                producto = lista_general[i][j] * lista_general[i + 1][j]
-                lista_general[i + 1][j] = producto
+                # Multiply coefficients from this level with the next one
+                lista_general[i + 1][j] = lista_general[i][j] * lista_general[i + 1][j]
 
-        # Aplanamos la última lista de coeficientes
+        # Flatten the final level
         lista_general[-1] = [x for sublist in lista_general[-1] for x in sublist]
 
-        # Paso 3: Graficar si se solicita
+        # 3) Plot if requested
         if graf1:
-            # Para la gráfica no retornamos coef
-            coef = False
-
-            # Construimos los subintervalos
+            coef = False  # Do not return coefficients if plotting
             intervalos = [
-                np.linspace(i * b ** (-kmax), (i + 1) * b ** (-kmax), m)
-                for i in range(b**kmax)
+                np.linspace(i * b**-kmax, (i + 1) * b**-kmax, m) for i in range(b**kmax)
             ]
-            # Construimos la densidad medida
-            # 2^(kmax+1) * valor => densidad renormalizada
-            salida = [2 ** (kmax + 1) * c * np.ones(m) for c in lista_general[-1]]
+            # Scale the output to show the density
+            salida = [2.0 ** (kmax + 1) * c * np.ones(m) for c in lista_general[-1]]
 
             x = np.array([p for sublist in intervalos for p in sublist])
             y = np.array([p for sublist in salida for p in sublist])
 
-            plt.plot(x, y, linewidth=0.5)
-            plt.title(f"Iteración {kmax}")
+            # Plot the cascade
+            plt.plot(x, y, linewidth=0.5, color="blue")
+            plt.title(f"Random Binomial Cascade: kmax={kmax}")
             plt.xlim(0, 1)
-            plt.ylim(0, np.amax(y) + 0.1)
+            plt.ylim(0, np.amax(y) + 0.1 * np.amax(y))  # Add some margin above
+            plt.grid(True)
             plt.show()
 
-        # Paso 4: Retornar los coeficientes (si se desea)
         if coef:
-            return lista_general
+            return lista_general  # Return the coefficients if requested
 
     def multifractal_measure_rand2(
         self,
-        b: int = 2,
-        m: int = 1,
+        b: int,
+        m: int,
+        kmax: int,
+        falpha: np.ndarray,
+        derivada: np.ndarray,
+        h1: float,
+        Price: np.ndarray,
         masas1: bool = False,
         masas2: bool = True,
         coef: bool = False,
@@ -133,188 +112,181 @@ class BinomialMultifractalRand:
         cumsum: bool = False,
     ):
         """
-        Genera una medida multifractal con distribución lognormal base 2, en concordancia
-        con ciertos parámetros λ y σ (varianza) derivados de la página 22 de un documento
-        (DM/Dollar). Emplea la aproximación de cascada multiplicativa.
+        Generates a multifractal measure using a base-2 lognormal distribution
+        with parameters derived from α₀ = derivada[posicion_max] and
+        λ=α₀/h₁, var=2*(λ-1)/ln(2).
 
-        Parámetros
+        Parameters
         ----------
-        b : int, opcional (default=2)
-            Número de divisiones en cada iteración (normalmente binomial).
-        m : int, opcional (default=1)
-            Número de puntos en cada subintervalo para fines de graficación.
-        masas1 : bool, opcional (default=False)
-            Si True, usa una forma alternativa de asignar las masas (m00,m11).
-        masas2 : bool, opcional (default=True)
-            Si True, usa la versión lognormal base 2 para asignar las masas (m00,m11).
-        coef : bool, opcional (default=False)
-            Si es True, retorna la lista de coeficientes finales, así como λ y la varianza.
-        graf1 : bool, opcional (default=False)
-            Si es True, grafica la medida multifractal final (no retorna coeficientes).
-        cumsum : bool, opcional (default=False)
-            Si es True, retorna la suma acumulada de la última iteración (la medida).
+        b : int
+            Number of divisions at each iteration.
+        m : int
+            Points in each subinterval for plotting.
+        kmax : int
+            Depth of the cascade.
+        falpha : np.ndarray
+            Array with the function f(α).
+        derivada : np.ndarray
+            Array with α(q).
+        h1 : float
+            Hurst exponent.
+        Price : np.ndarray
+            Price series for combining with FBM simulation later.
+        masas1 : bool
+            Alternative method for assigning weights.
+        masas2 : bool
+            Lognormal base-2 method for assigning weights.
+        coef : bool
+            If True, returns the final measure and parameters λ, var.
+        graf1 : bool
+            If True, plots the final measure.
+        cumsum : bool
+            If True, returns the cumulative sum (np.cumsum).
 
-        Retorno
+        Returns
         -------
-        - (lista_general, lambdas, varianza) si coef es True.
-        - np.ndarray (suma acumulada) si cumsum es True (y coef es False).
-        - None en caso de solo graficar o no solicitar coef ni cumsum.
+        - (lista_general, lambdas, varianza) if coef=True
+        - np.cumsum(lista_general[-1]) if cumsum=True and coef=False
+        - None otherwise.
         """
 
-        kmax = self.kmax
-        # Buscamos la posición donde f(alpha) es máximo
-        posicion_max = np.argmax(self.falpha)
-        alpha0 = self.derivada[posicion_max]
+        # 1) Find the position where f(alpha) is maximum => α₀
+        pos_max = np.argmax(falpha)
+        alpha0 = derivada[pos_max]  # Value of α at the max position
 
-        # Definimos lambdas y varianza según la teoría lognormal base 2
-        lambdas = alpha0 / self.h1
-        varianza = 2.0 * (lambdas - 1.0) / np.log(2.0)
+        # 2) Calculate multifractal parameters
+        lambdas = alpha0 / h1  # λ parameter
+        varianza = 2.0 * (lambdas - 1.0) / np.log(2.0)  # Variance
 
-        # Función interna para generar la variable lognormal base 2
+        if varianza < 0:
+            raise ValueError("Negative variance: inconsistent parameters.")
+
+        # 3) Define a base-2 lognormal generator
         def lognormal_base2(lmbda, var):
-            normal_rv = np.random.normal(loc=lmbda, scale=np.sqrt(var))
-            return 2.0 ** (-normal_rv)
+            z = np.random.normal(lmbda, np.sqrt(var))
+            return 2.0 ** (-z)
 
-        # Lista principal de coeficientes en cascada
-        lista_general = []
+        # 4) Build the cascade
+        lista_general = []  # This will store all levels of the cascade
         for k in range(kmax):
-            lista_coeficientes = []
-            for _ in range(2**k):
+            fila_coefs = []  # Coefficients at level k
+            for _ in range(2**k):  # Number of intervals at level k
                 if masas1:
-                    # Caso alternativo (masas1)
-                    # Forma normalizada a partir de lognormal base 2
-                    m00 = (lambda x: x / (x + 1.0 / x))(
-                        2.0 ** -np.random.normal(lambdas, np.sqrt(varianza))
-                    )
+                    # Use the ratio method for masses
+                    rnum = np.random.normal(lambdas, np.sqrt(varianza))
+                    val = 2.0 ** (-rnum)
+                    m00 = val / (val + 1.0 / val)
                     m11 = 1.0 - m00
                 elif masas2:
-                    # Caso lognormal base 2
+                    # Use lognormal base-2
                     m00 = lognormal_base2(lambdas, varianza)
                     m11 = lognormal_base2(lambdas, varianza)
-                lista_coeficientes.append(np.array([m00, m11]))
-            lista_general.append(lista_coeficientes)
+                fila_coefs.append(np.array([m00, m11]))
+            lista_general.append(fila_coefs)
 
-        # Multiplicación en cascada y flatten
-        for i in range(len(lista_general) - 1):
+        # 5) Multiply coefficients across levels
+        for i in range(kmax - 1):
             lista_general[i] = [x for sublist in lista_general[i] for x in sublist]
             for j in range(len(lista_general[i])):
-                producto = lista_general[i][j] * lista_general[i + 1][j]
-                lista_general[i + 1][j] = producto
+                lista_general[i + 1][j] = lista_general[i][j] * lista_general[i + 1][j]
 
-        # Convertimos a array para la última capa
         lista_general[-1] = np.array(
             [x for sublist in lista_general[-1] for x in sublist]
         )
 
-        # Normalización adicional con una variable aleatoria 'omega'
-        # (Explicada en los apuntes del autor)
+        # 6) Normalize using a random variable
         media_omega = 1.0 / (2.0 ** (-lambdas * kmax))
         omega = np.random.normal(media_omega, np.sqrt(varianza), 2**kmax)
         lista_general[-1] *= omega
 
-        # Graficar la medida multifractal final
+        # 7) Plot the measure if requested
         if graf1:
+            # Turn off coefficient return
             coef = False
+
             intervalos = [
-                np.linspace(i * b ** (-kmax), (i + 1) * b ** (-kmax), m)
-                for i in range(b**kmax)
+                np.linspace(i * b**-kmax, (i + 1) * b**-kmax, m) for i in range(b**kmax)
             ]
-            salida = [c * np.ones(m) for c in lista_general[-1]]
+            salida = [val * np.ones(m) for val in lista_general[-1]]
             x = np.array([p for sublist in intervalos for p in sublist])
             y = np.array([p for sublist in salida for p in sublist])
 
             fig, ax = plt.subplots(figsize=(12, 4))
-            ax.plot(x, y, linewidth=0.8)
+            ax.plot(x, y, linewidth=0.8, color="black")
             ax.set_xlim([0, 1])
-            ax.set_ylim([0, np.amax(y) + 0.1 * np.amax(y)])
+            ymax = np.amax(y)
+            ax.set_ylim([0, ymax + 0.1 * ymax])
             ax.tick_params(axis="both", which="major", labelsize=10)
             ax.grid(True)
-            ax.set_title("Medida multifractal (lognormal base 2)")
+            ax.set_title("Base-2 Lognormal Multifractal Measure")
             plt.show()
 
-        # Retorno de coeficientes o cumsum
+        # 8) Return the appropriate result
         if coef:
             return lista_general, lambdas, varianza
+
         if cumsum:
             return np.cumsum(lista_general[-1])
 
-    def simulacion(self, grafs: bool = False, results: bool = False):
-        """
-        Simulación de un "trading time" deformado a partir de la medida multifractal
-        y combinación con un movimiento Browniano fraccionario.
 
-        Parámetros
-        ----------
-        grafs : bool, opcional (default=False)
-            Si True, muestra diversas gráficas de la simulación.
-        results : bool, opcional (default=False)
-            Si True, retorna la serie 'tradingtime' resultante.
+def simulacion(self, grafs: bool = False, results: bool = False):
+    """
+    Simulates a price trajectory using a multifractal cascade
+    combined with Fractional Brownian Motion (FBM).
 
-        Retorno
-        -------
-        - np.ndarray si results=True, con la deformación del tiempo simulada.
-        - None si results=False (solo realiza las gráficas si grafs=True).
-        """
-        kmax = self.kmax
+    Parameters
+    ----------
+    grafs : bool (default=False)
+        If True, plots the results (trading time and prices).
+    results : bool (default=False)
+        If True, returns the normalized multifractal trading time.
 
-        # Obtenemos el 'trading time' normalizado a partir de la medida multifractal
-        tradingtime = self.multifractal_measure_rand2(cumsum=True)
-        tradingtime = 2**kmax * (tradingtime / np.amax(tradingtime))
+    Returns
+    -------
+    tradingtime : np.ndarray, optional
+        The normalized trading time, if results=True.
+    """
+    kmax = self.kmax  # Depth of the cascade
 
-        # Movimiento Browniano fraccionario
-        fbm = stochastic.FractionalBrownianMotion(hurst=self.h1)
-        simulacionfbm = fbm._sample_fractional_brownian_motion(2**kmax - 1)
-        xtsimulados = simulacionfbm
+    # Generate trading time using a multifractal cascade
+    tradingtime = self.multifractal_measure_rand2(
+        b=2,
+        m=1,
+        kmax=self.kmax,
+        falpha=self.falpha,
+        derivada=self.derivada,
+        h1=self.h1,
+        Price=self.Price,
+        masas1=False,
+        masas2=True,
+        coef=False,
+        graf1=False,
+        cumsum=True,
+    )
+    tradingtime = 2**kmax * (tradingtime / np.amax(tradingtime))  # Normalize
 
-        precio_final = self.Price[0] * np.exp(xtsimulados)
+    # Simulate FBM for log-price increments
+    fbm = stochastic.FractionalBrownianMotion(hurst=self.h1)
+    simulacionfbm = fbm._sample_fractional_brownian_motion(2**kmax - 1)
+    xtsim = simulacionfbm
 
-        # Gráficas
-        if grafs:
-            plt.figure(figsize=(10, 4))
-            plt.plot(np.arange(2**kmax), tradingtime)
-            plt.title("Tiempo de 'trading' (multifractal) normalizado")
-            plt.xlabel("Días (índice)")
-            plt.ylabel("TradingTime")
-            plt.grid(True)
-            plt.show()
+    # Compute the final price: P(t) = P(0) * exp(X(t))
+    precio_final = self.Price[0] * np.exp(xtsim)
 
-            # Gráfica composición: tradingtime vs precio_final
-            plt.figure(figsize=(10, 4))
-            plt.plot(tradingtime, precio_final)
-            plt.title("Precio con deformación multifractal del tiempo")
-            plt.xlabel("TradingTime")
-            plt.ylabel("Precio")
-            plt.grid(True)
-            plt.show()
+    # Plot results if requested
+    if grafs:
+        plt.figure(figsize=(10, 4))
+        plt.plot(np.arange(2**kmax), tradingtime, color="blue")
+        plt.title("Normalized Multifractal Trading Time")
+        plt.grid(True)
+        plt.show()
 
-            # Gráfica sin deformación (eje x = tiempo 'real')
-            plt.figure(figsize=(10, 4))
-            plt.plot(np.arange(2**kmax), precio_final)
-            plt.title("Precio sin deformación (tiempo real)")
-            plt.xlabel("Días")
-            plt.ylabel("Precio")
-            plt.grid(True)
-            plt.show()
+        plt.figure(figsize=(10, 4))
+        plt.plot(tradingtime, precio_final, color="green")
+        plt.title("Price with Multifractal Time Deformation")
+        plt.grid(True)
+        plt.show()
 
-            # Diferencias del precio
-            plt.figure(figsize=(10, 4))
-            plt.plot(
-                np.arange(2**kmax - 1), precio_final[1:] - precio_final[:-1], lw=0.5
-            )
-            plt.title("Incrementos de precio")
-            plt.xlabel("Días")
-            plt.ylabel("Incremento")
-            plt.grid(True)
-            plt.show()
-
-            # Repetimos la gráfica de tradingtime vs precio_final, con título distinto
-            plt.figure(figsize=(10, 4))
-            plt.plot(tradingtime, precio_final)
-            plt.title("Precio vs TradingTime (repetición)")
-            plt.xlabel("TradingTime")
-            plt.ylabel("Precio")
-            plt.grid(True)
-            plt.show()
-
-        if results:
-            return tradingtime
+    # Return trading time if requested
+    if results:
+        return tradingtime

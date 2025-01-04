@@ -4,7 +4,7 @@ import matplotlib.dates as mdates
 
 
 class Graphs:
-    """
+    r"""
     This class provides basic data handling and plotting functionality
     for a financial time series, including:
     - Price plot
@@ -117,7 +117,7 @@ class Graphs:
         plt.show()
 
     def graf_Price_change(self, deltat=1, result=False, graf=True):
-        """
+        r"""
         Calculate and optionally plot the relative change in asset prices.
 
         Parameters
