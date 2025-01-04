@@ -134,22 +134,20 @@ class Graphs:
         variacion_prices1 : np.ndarray (if result=True)
             Array of absolute price differences over the chosen deltat.
         """
-        # 1) Compute price differences
+        # Compute price differences
         variacion_prices1 = self.Price[deltat::deltat] - self.Price[:-deltat:deltat]
 
-        # 2) Compute the average of consecutive prices to scale the difference
-        #    so that the result is a relative difference
+        # Compute the average of consecutive prices to scale the difference
+        # so that the result is a relative difference
         media = (self.Price[:-1] + self.Price[1:]) / 2.0
         # Ensure we only use the portion that matches variacion_prices1 length
         media = media[: len(variacion_prices1)]
 
-        # 3) Relative price variation
+        # Relative price variation
         variacion_prices = variacion_prices1 / media
 
-        # 4) Plot if requested
         if graf:
             fig, ax = plt.subplots(figsize=(24, 5))
-            # The x-axis: days up to len(variacion_prices)
             ax.plot(self.days[:-1], variacion_prices, linewidth=0.5)
 
             ax.xaxis.set_major_locator(plt.MaxNLocator(6))

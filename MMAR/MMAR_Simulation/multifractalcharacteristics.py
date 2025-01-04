@@ -8,17 +8,6 @@ from ..Multifractal_Measure.multifractal_measure_rand import BinomialMultifracta
 
 
 class MultifractalCharacteristics(Graphs):
-    """
-    A Python implementation of multifractal analysis for financial time series, inheriting from a `Graphs` class.
-    Key attributes are: dataset, time, price, and several hyperparameters for controlling the analysis.
-
-    This improved version refactors code to:
-      1. Unify and centralize computations (partition functions, tau, alpha, etc.).
-      2. Reduce redundancy and ensure consistent results.
-      3. Correctly compute tau by leveraging robust polynomial fits, avoiding normalization pitfalls.
-      4. Provide better docstrings, variable names, and code organization.
-    """
-
     def __init__(
         self, dataset, time, price, a=0, b=5, npoints=20, deltas=None, kmax=13
     ):
@@ -44,13 +33,13 @@ class MultifractalCharacteristics(Graphs):
         """
         super().__init__(dataset, time, price, a, b, npoints, deltas, kmax)
 
-        # 1) Store the partition function analysis
+        # Store the partition function analysis
         #    We do one consolidated pass to get all necessary pieces: partition_fns, logfits, etc.
         pf_result = self.partition_functions(graf1=False, result=True)
         self.partition = pf_result[0]  # raw partition functions for each q
         self.fits = pf_result[1]  # polynomial fits [slope, intercept] in log-log space
 
-        # 2) Compute tau(q), f(alpha), derivative alpha(q) via a single call
+        # Compute tau(q), f(alpha), derivative alpha(q) via a single call
         taualpha_result = self.compute_tau_and_alpha(graf=False, results=True)
         self.tau = taualpha_result["tau_spline"]  # tau(q) evaluated on finer grid
         self.falpha = taualpha_result["falpha"]  # f(alpha) on same finer grid
@@ -58,14 +47,14 @@ class MultifractalCharacteristics(Graphs):
             "alpha_vals"
         ]  # alpha(q) = derivative of tau wrt q on finer grid
 
-        # 3) Hurst exponent
+        # Hurst exponent
         self.h1 = self.hurst_exponent(graf=False)
 
-        # 4) Extract alpha0 = alpha that maximizes f(alpha)
+        # Extract alpha0 = alpha that maximizes f(alpha)
         self.posicion_max = np.argmax(self.falpha)
         self.alpha0 = self.derivada[self.posicion_max]
 
-        # 5) Derived parameters lambdas, varianza
+        # Derived parameters lambdas, varianza
         self.lambdas = self.alpha0 / self.h1
         self.varianza = 2 * (self.lambdas - 1) / np.log(2)
 
@@ -106,8 +95,8 @@ class MultifractalCharacteristics(Graphs):
         # Define q-grid
         qs = np.linspace(a, b, npoints)
 
-        # 1. Compute partition functions
-        #    partition_functions[i] is the list of S_q_i(deltas), over j in deltas
+        # Compute partition functions partition_functions[i] is the list of S_q_i(deltas),
+        # over j in deltas
         partition_functions = []
         for q in qs:
             pf_q = []
@@ -120,23 +109,17 @@ class MultifractalCharacteristics(Graphs):
                 pf_q.append(pf_val)
             partition_functions.append(pf_q)
 
-        # 2. Fit log10(partition_functions) vs log10(deltas)
+        # Fit log10(partition_functions) vs log10(deltas)
         #    For each q, we do an OLS fit: log10(S_q) = m * log10(delta) + c
         #    We'll store them in "adjustment_part_functions"
         adjustment_part_functions = []
         for i in range(npoints):
-            # Avoid dividing by zero if partition_functions[i][0] is zero or near zero
-            # We'll do the fit with raw log10(S_q_i(deltas)).
-            # If the first element is 0, fallback or skip.
-            # (But we assume the data is always positive in typical usage.)
             logy = np.log10(partition_functions[i])
             logx = np.log10(deltas)
-
-            # slope, intercept
             pfit = np.polyfit(logx, logy, 1)
             adjustment_part_functions.append(pfit)
 
-        # 3. Compute residuals and standard error
+        # Compute residuals and standard error
         srs = []
         for i in range(npoints):
             logx = np.log10(deltas)
@@ -145,8 +128,7 @@ class MultifractalCharacteristics(Graphs):
             srs_i = np.sqrt(np.sum(residuals**2) / (ldeltas - 2))
             srs.append(srs_i)
 
-        # 4. Compute confidence intervals
-        #    For intercept and slope. Cf. standard formula for linear regression in log-log space.
+        # Compute confidence intervals
         intervalos_conf_ordenada = []
         intervalos_conf_pendiente = []
         for i in range(npoints):
@@ -166,8 +148,8 @@ class MultifractalCharacteristics(Graphs):
             )
             intervalos_conf_pendiente.append(ci_slope)
 
-        # 5. Correlation test
-        #    We'll check the correlation between log10(partition_functions) and log10(deltas).
+        # Correlation test. We'll check the correlation between
+        # log10(partition_functions) and log10(deltas).
         corrtest1 = []
         corrtest2 = []
         for i in range(npoints):
@@ -212,7 +194,6 @@ class MultifractalCharacteristics(Graphs):
             # We only plot those q in qslim (rejected null hypothesis).
             for idx, q in enumerate(qs):
                 if q not in qslim:
-                    # skip plotting if the correlation test wasn't significant
                     continue
                 logx = np.log10(deltas)
                 logy = np.log10(partition_functions[idx])
@@ -297,10 +278,6 @@ class MultifractalCharacteristics(Graphs):
         - \(\alpha(q) = d\tau/dq\)
         - \(f(\alpha) = q \alpha - \tau(q)\)
 
-        This version uses the partition function already computed in `partition_functions`.
-        Internally, it re-fits the log of the partition function vs. log(deltas),
-        then uses a spline to derive smooth estimates of \(\tau\) and \(\alpha\).
-
         Parameters
         ----------
         alpha : float
@@ -318,7 +295,7 @@ class MultifractalCharacteristics(Graphs):
                 "falpha":     array-like of f(alpha) on that fine q-grid,
                 "alpha_vals": array-like of alpha(q) on that fine q-grid
             }
-        Otherwise, None.
+        Otherwise, None
         """
         a, b, npoints = self.a, self.b, self.npoints
         deltas = self.deltas
@@ -335,17 +312,10 @@ class MultifractalCharacteristics(Graphs):
         partition_functions = self.partition
         adjustment_part_functions = self.fits
 
-        # 2. The slope in each fit is an estimate of tau(q), but we must be careful with the log-scaling:
-        #    We have log10(S_q(Δt)) ~ slope * log10(Δt) + intercept
-        #    => slope = d[ log10(S_q(Δt)) ] / d[ log10(Δt) ]
-        #    The base-10 vs base-e can be a factor, but as commonly done, the slope is the fractal exponent.
-        #    We'll treat 'slope' as tau(q) in base 10 logs.
-        #    If you want natural log tau, you'd convert slope *= ln(10).
-        #    We'll keep it consistent with the code logic.
+        # The slope in each fit is an estimate of tau(q), but we must be careful with the log-scaling:
         tau_estimate = np.array([pfit[0] for pfit in adjustment_part_functions])
 
-        # 3. Create a spline in the (q, tau) domain
-        #    We'll evaluate it on a finer grid for smooth alpha(q) and f(alpha).
+        #  Create a spline in the (q, tau) domain
         q_fine = np.linspace(qs[0], qs[-1], 1000)
         spline_tau = UnivariateSpline(qs, tau_estimate, s=0)  # no smoothing
 
@@ -414,30 +384,25 @@ class MultifractalCharacteristics(Graphs):
         a, b, npoints = self.a, self.b, self.npoints
         qs = np.linspace(a, b, npoints)
 
-        # 1) Ensure we have the partition functions and their fits
+        # Ensure we have the partition functions and their fits
         if not hasattr(self, "partition") or not hasattr(self, "fits"):
             pf_result = self.partition_functions(graf1=False, result=True)
             self.partition = pf_result[0]
             self.fits = pf_result[1]
 
-        # 2) The slope from the log-log fits is basically tau(q).
+        # The slope from the log-log fits is basically tau(q).
         tau_vals = np.array([pfit[0] for pfit in self.fits])
         spline_tau = UnivariateSpline(qs, tau_vals, s=0)
 
-        # 3) Find roots of tau(q). This is a guess approach for H.
-        #    If tau(q0) = 0, that q0 might be the 'dimension' -> H = 1 / q0
-        #    or we do the classical approach with q=2 => tau(2) = 2H - 1, => H = (tau(2) + 1)/2
-        #    We replicate the original logic: find the first root in [a,b].
+        #  Find roots of tau(q). This is a guess approach for H.
         roots = spline_tau.roots()
         if len(roots) > 0:
             # Just take the first root
             sol1 = roots[0]
             # Then H = 1 / sol1, as in original code.
             # Note: This is a very specific interpretation from the original snippet.
-            # Some references define H differently. Use with caution.
             h1 = 1.0 / sol1
         else:
-            # fallback approach: just use q=2 => tau(2) = 2H - 1 => H = (tau(2) + 1)/2
             tau_at_2 = spline_tau(2.0)
             h1 = (tau_at_2 + 1.0) / 2.0
 
@@ -460,8 +425,6 @@ class MultifractalCharacteristics(Graphs):
     ):
         """
         Generates a multifractal measure using the 'BinomialMultifractalRand' class.
-        This method keeps the same parameters and structure as other parts of the
-        code to stay compatible.
 
         Parameters
         ----------
@@ -489,17 +452,14 @@ class MultifractalCharacteristics(Graphs):
         """
         # Create an instance of the class that handles the measure creation.
         binomRand = BinomialMultifractalRand()
-
-        # Use the method from the BinomialMultifractalRand class to create the measure.
-        # We pass in parameters from this class (like `self.kmax` or `self.h1`).
         result = binomRand.multifractal_measure_rand2(
             b=b,
             m=m,
-            kmax=self.kmax,  # Maximum depth of the cascade
-            falpha=self.falpha,  # Values for the multifractal spectrum
-            derivada=self.derivada,  # The derivative of tau(q)
-            h1=self.h1,  # Hurst exponent
-            Price=self.Price,  # Price series data
+            kmax=self.kmax,
+            falpha=self.falpha,
+            derivada=self.derivada,
+            h1=self.h1,
+            Price=self.Price,
             masas1=masas1,
             masas2=masas2,
             coef=coef,

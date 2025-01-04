@@ -83,7 +83,7 @@ class MMAR(MultifractalCharacteristics):
         # Normalize trading time to range [0, 2^kmax]
         tradingtime = npts * (tradingtime / np.max(tradingtime))
 
-        # 2) Fractional Brownian Motion increments
+        #  Fractional Brownian Motion increments
         fbm = FractionalBrownianMotion(hurst=self.h1)
         simulacion_fbm = fbm._sample_fractional_brownian_motion(npts - 1)
 
@@ -196,7 +196,7 @@ class MMAR(MultifractalCharacteristics):
             # Scale
             tradingtime = npts * (tradingtime / np.max(tradingtime))
 
-            # 2) Generate FBM increments
+            #  Generate FBM increments
             fbm = FractionalBrownianMotion(hurst=self.h1)
             simulacion_fbm = fbm._sample_fractional_brownian_motion(npts - 1)
 
