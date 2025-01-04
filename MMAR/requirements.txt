@@ -1,16 +1,6 @@
-# requirements.txt
-
-
-# Numeric and Data Analysis Libraries
-numpy 
-pandas
-
-# Optimization and Statistics Libraries
-scipy
-statsmodels
-
-# Visualization Libraries
-matplotlib
-
-# External Libraries
-stochastic
+numpy>=1.26.0
+pandas>=2.1.1
+scipy>=1.11.2
+statsmodels>=0.14.0
+matplotlib>=3.8.0
+stochastic>=0.6.0

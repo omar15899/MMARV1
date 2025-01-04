@@ -219,7 +219,7 @@ class MMAR(MultifractalCharacteristics):
         plot_simulation(almacen_tradingtime, almacen_xt, "Real Time (days)", "X(t)")
 
         # Alternatively, we can also plot the tradingtime vs. index
-        # but the user logic may differ. For demonstration:
+        # but the user logic may differ.
         plot_simulation(
             [range(npts)] * n, almacen_tradingtime, "Integer Steps", "Trading Time"
         )
