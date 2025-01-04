@@ -14,3 +14,5 @@ venv/
 # Archivos de prueba o logs
 *.log
 *.txt
+
+.hidden/
