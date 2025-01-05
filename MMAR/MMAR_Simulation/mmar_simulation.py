@@ -62,7 +62,7 @@ class MMAR(MultifractalCharacteristics):
         tradingtime : np.ndarray, optional
             The (normalized) multifractal trading time if results=True.
         """
-        # 1) Generate the multifractal measure
+        # Generate the multifractal measure
         binom = BinomialMultifractalRand()
         npts = 2**self.kmax
         tradingtime = binom.multifractal_measure_rand2(
@@ -196,11 +196,11 @@ class MMAR(MultifractalCharacteristics):
             # Scale
             tradingtime = npts * (tradingtime / np.max(tradingtime))
 
-            #  Generate FBM increments
+            # Generate FBM increments
             fbm = FractionalBrownianMotion(hurst=self.h1)
             simulacion_fbm = fbm._sample_fractional_brownian_motion(npts - 1)
 
-            # 3) Compute final prices
+            # Compute final prices
             xt_sim = simulacion_fbm
             # We use the last known price as reference
             precio_final = self.Price[-1] * np.exp(xt_sim)
@@ -231,9 +231,6 @@ class MMAR(MultifractalCharacteristics):
         shows how the random 'time deformation' changes the distribution of
         prices at the chosen real day.
 
-        Additionally, checks for 'fat tails' by comparing the empirical
-        distribution to a Gaussian, plotting the difference in log-scale.
-
         Parameters
         ----------
         day : float
@@ -259,7 +256,7 @@ class MMAR(MultifractalCharacteristics):
         media = np.mean(precios_en_dia)
         stdd = np.std(precios_en_dia)
 
-        # (1) Plot histogram + Gaussian
+        # Plot histogram + Gaussian
         plt.style.use("default")
         fig, ax = plt.subplots(figsize=(12, 8))
         hist_vals, bins, _ = ax.hist(
@@ -294,103 +291,5 @@ class MMAR(MultifractalCharacteristics):
         ax.grid(axis="y", linestyle="--", alpha=0.7)
         ax.legend(loc="upper right", fontsize=14)
         plt.title(f"Distribution of Prices at Real Time = {day}", fontsize=14)
-        plt.tight_layout()
-        plt.show()
-
-        # (2) Check for fat tails:
-        # One approach is to compare the log of the empirical survival function with
-        # the log of the Gaussian survival function.
-        # We can do a simple tail index check, or just do a Q-Q plot as well.
-        self._check_fat_tails(precios_en_dia, media, stdd)
-
-    def _plot_simulation_ensemble(
-        self, x_values_list, y_values_list, x_label, y_label, n
-    ):
-        """
-        Utility function to plot multiple simulation paths in a single figure.
-        """
-        plt.style.use("default")
-        fig, ax = plt.subplots(figsize=(12, 8))
-        for x_vals, y_vals in zip(x_values_list, y_values_list):
-            ax.plot(x_vals, y_vals, lw=0.5, alpha=0.1, color="black")
-
-        # Highlight one path in blue for better visibility
-        mid_index = n // 2
-        ax.plot(
-            x_values_list[mid_index],
-            y_values_list[mid_index],
-            lw=1.0,
-            alpha=1,
-            color="blue",
-            label="One Example Path",
-        )
-
-        ax.set_xlabel(x_label, fontsize=16)
-        ax.set_ylabel(y_label, fontsize=16)
-        ax.tick_params(axis="both", labelsize=14)
-        ax.grid(True, linestyle="--", alpha=0.7)
-        plt.legend(fontsize=14)
-        plt.tight_layout()
-        plt.show()
-
-    def _check_fat_tails(self, data, mean_val, std_val):
-        """
-        Check for fat tails by comparing the empirical tail distribution
-        to that of a normal distribution. We'll produce a Q-Q plot and
-        a log-survival function plot.
-
-        data : array-like
-            The sample of prices at a given time.
-        mean_val : float
-            Mean of the data.
-        std_val : float
-            Std dev of the data.
-        """
-        sorted_data = np.sort(data)
-        n = len(sorted_data)
-        # Q-Q plot vs normal
-        theoretical_q = stats.norm.ppf(
-            (np.arange(n) + 0.5) / n, loc=mean_val, scale=std_val
-        )
-
-        # (A) Q-Q plot
-        plt.figure(figsize=(8, 6))
-        plt.plot(
-            theoretical_q, sorted_data, "o", markersize=3, alpha=0.5, label="Data Q-Q"
-        )
-        min_q, max_q = min(theoretical_q), max(theoretical_q)
-        plt.plot(
-            [min_q, max_q],
-            [min_q, max_q],
-            color="red",
-            linestyle="--",
-            label="Perfect Normal",
-        )
-        plt.title("Q-Q Plot (Data vs. Normal)")
-        plt.xlabel("Theoretical Quantiles")
-        plt.ylabel("Empirical Quantiles")
-        plt.legend()
-        plt.grid(True, linestyle="--", alpha=0.7)
-        plt.tight_layout()
-        plt.show()
-
-        # (B) Survival function (SF): P(X > x). We'll compare log(SF_data) vs. log(SF_normal).
-        # Empirical survival
-        sf_data = 1.0 - np.arange(1, n + 1) / n
-        # Normal SF for sorted_data
-        sf_norm = 1.0 - stats.norm.cdf(sorted_data, loc=mean_val, scale=std_val)
-
-        # Plot in log scale
-        plt.figure(figsize=(8, 6))
-        plt.plot(
-            sorted_data, sf_data, "o", markersize=3, alpha=0.5, label="Empirical SF"
-        )
-        plt.plot(sorted_data, sf_norm, color="red", alpha=0.7, label="Normal SF")
-        plt.yscale("log")  # log scale on y
-        plt.title("Survival Function Comparison (Log Scale)")
-        plt.xlabel("Price")
-        plt.ylabel("P(X > x) (log scale)")
-        plt.grid(True, linestyle="--", alpha=0.7)
-        plt.legend()
         plt.tight_layout()
         plt.show()
