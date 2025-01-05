@@ -23,12 +23,12 @@ This project includes tools and scripts designed for multifractal analysis, simu
 
 Install the dependencies using:
 
-pip install numpy matplotlib scipy pandas
+`pip install numpy matplotlib scipy pandas`
 
 ### Clone the Repository
 
-git clone <REPOSITORY_URL>
-cd multifractal-analysis-toolkit
+`git clone <REPOSITORY_URL>`
+`cd multifractal-analysis-toolkit`
 
 ## Usage
 
@@ -38,58 +38,53 @@ cd multifractal-analysis-toolkit
 
 Simulate a multifractal measure:
 
-python mmar_simulation.py --length 1024 --hurst 0.7 --output mmar_simulation_output.txt
+`python mmar_simulation.py --length 1024 --hurst 0.7 --output mmar_simulation_output.txt`
 
 #### `multifractal_measure_det.py`
 
 Analyze a deterministic multifractal measure:
 
-python multifractal_measure_det.py --input data.txt --resolution 512 --output measure_analysis.png
+`python multifractal_measure_det.py --input data.txt --resolution 512 --output measure_analysis.png`
 
 #### `multifractal_measure_rand.py`
 
 Generate and analyze a random multifractal measure:
 
-python multifractal_measure_rand.py --length 1024 --seed 42 --output random_measure_results.txt
+`python multifractal_measure_rand.py --length 1024 --seed 42 --output random_measure_results.txt`
 
 #### `multifractalcharacteristics.py`
 
 Compute multifractal characteristics:
 
-python multifractalcharacteristics.py --input data.txt --type "dimension_spectrum" --output spectrum_plot.png
+`python multifractalcharacteristics.py --input data.txt --type "dimension_spectrum" --output spectrum_plot.png`
 
 #### `graphs.py`
 
 Generate graphs based on multifractal data:
 
-python graphs.py --input results.txt --type "scatter" --output graph.png
+`python graphs.py --input results.txt --type "scatter" --output graph.png`
 
 ### Help and Parameters
 
 All scripts include a help option to check the available parameters:
 
-python <script>.py --help
+`python <script>.py --help`
 
 For example:
 
-python mmar_simulation.py --help
+`python mmar_simulation.py --help`
 
 ## Workflow Example
 
 1. Generate an MMAR simulation:
-   python mmar_simulation.py --length 2048 --hurst 0.5 --output simulation_data.txt
+   `python mmar_simulation.py --length 2048 --hurst 0.5 --output simulation_data.txt`
 
 2. Compute multifractal characteristics:
-   python multifractalcharacteristics.py --input simulation_data.txt --type "dimension_spectrum" --output spectrum.png
+   `python multifractalcharacteristics.py --input simulation_data.txt --type "dimension_spectrum" --output spectrum.png`
 
 3. Visualize the results:
-   python graphs.py --input simulation_data.txt --type "line" --output visualization.png
+   `python graphs.py --input simulation_data.txt --type "line" --output visualization.png`
 
 ## Contributions
 
 Contributions are welcome. Please open an issue or submit a pull request in the repository.
-
-## License
-
-This project is licensed under the [MIT License](LICENSE).
-

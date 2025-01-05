@@ -14,6 +14,9 @@ venv/
 # Archivos de prueba o logs
 *.log
 *.txt
-
 .hidden/
 *.DS_Store
+
+
+# Excepto
+!Readme.md
