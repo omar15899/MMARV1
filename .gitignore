@@ -1,7 +1,25 @@
+# Archivos temporales de Python
 __pycache__/
 *.pyc
 *.pyo
-.DS_Store
-.venv/
+
+# Archivos de entornos virtuales
+env/
 venv/
+
+# Archivos de configuración específicos del editor
+.vscode/
+*.code-workspace
+
+# Archivos de prueba o logs
+*.log
+*.txt
+.hidden/
+*.DS_Store
+
+
+# Excepto
+!Readme.md
+# Añadidos 2026-05-12
 .env
+.venv/
