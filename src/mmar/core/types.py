@@ -41,15 +41,21 @@ so ``f_alpha`` is always the *measure-view* spectrum: :math:`f(\alpha_0)=d` for
 a spectrum supported on the whole domain, and :math:`\alpha` is the Hölder
 exponent in both views.
 
-Sanity anchors that every estimator in this library is tested against:
+Sanity anchors that every estimator in this library is tested against. Note
+:math:`\zeta(0)=0` identically (:math:`S(0,\delta)=1` for every :math:`\delta`,
+so the slope vanishes) and :math:`\zeta(1)=1` for a conservative cascade
+(:math:`\tau(1)=0`) --- two free checks on any row of this table:
 
-======================  ====================================  ==================
-Object                  :math:`\zeta(q)`                      :math:`f(\alpha)`
-======================  ====================================  ==================
-fBm, Hurst :math:`H`    :math:`qH`                            :math:`\{(H,1)\}`
-Binomial :math:`m_0`    :math:`1-\log_2(m_0^q+m_1^q)`         entropy formula
-Lognormal cascade       :math:`q\lambda - \tfrac{\sigma^2}{2}q^2 \ln 2 + 1`   parabola
-======================  ====================================  ==================
+======================  ==================================================  ==================
+Object                  :math:`\zeta(q)`                                    :math:`f(\alpha)`
+======================  ==================================================  ==================
+fBm, Hurst :math:`H`    :math:`qH`                                          :math:`\{(H,1)\}`
+Binomial :math:`m_0`    :math:`1-\log_2(m_0^q+m_1^q)`                       entropy formula
+Lognormal cascade       :math:`q\lambda - \tfrac{\sigma^2\ln 2}{2}q^2`      parabola
+======================  ==================================================  ==================
+
+The closed forms live in :mod:`mmar.models.theory`; this table is the
+human-readable mirror and is tested against it.
 """
 
 from __future__ import annotations
