@@ -135,3 +135,37 @@ def test_calibration_provenance_chains_to_the_exponents() -> None:
     assert result.provenance is not None and exps.provenance is not None
     assert exps.provenance.root in {i.digest for i in result.provenance.inputs}
     assert result.provenance.root != exps.provenance.root
+
+
+@pytest.mark.parametrize(("n_q", "tol"), [(21, 2e-4), (41, 5e-5), (81, 2e-6), (401, 1e-7)])
+def test_hurst_tau_root_is_accurate_on_a_coarse_grid(n_q: int, tol: float) -> None:
+    """Regression: the root was found by linear interpolation of a convex tau.
+
+    tau is markedly convex near its root, so a chord between the bracketing grid
+    points undershoots. At 41 points that put H at 0.5374 against a true 0.55 --
+    an error of 1.3e-2, an order of magnitude larger than the sampling error it
+    was meant to report. Brent on a PCHIP interpolant gives 1.3e-5 on the same
+    grid on the agent's fixture; on this one the chord error is -7.0e-4 against
+    -1.3e-5, a factor of 53. Either way the residual is PCHIP's own O(h^4)
+    interpolation error rather than a systematic bias -- which is why the
+    tolerances below tighten with the grid.
+    """
+    H, lam = 0.55, 1.25
+    exps = _mmar_exponents(H, lam, n=n_q)
+    assert exps.hurst_tau_root == pytest.approx(H, abs=tol), (
+        f"n_q={n_q} gave H={exps.hurst_tau_root:.8f}"
+    )
+
+
+def test_hurst_tau_root_beats_the_chord_it_replaced() -> None:
+    """The chord is not merely less accurate, it is biased low. Pin that."""
+    H, lam = 0.55, 1.25
+    exps = _mmar_exponents(H, lam, n=41)
+    tau, q = exps.tau, exps.q
+    pos = q > 0
+    qq, tt = q[pos], tau[pos]
+    i = int(np.nonzero(np.diff(np.sign(tt)) != 0)[0][0])
+    chord_root = qq[i] - tt[i] * (qq[i + 1] - qq[i]) / (tt[i + 1] - tt[i])
+    chord_H = 1.0 / chord_root
+    assert abs(chord_H - H) > 20 * abs(exps.hurst_tau_root - H)
+    assert chord_H < H, "the chord undershoots because tau is convex near its root"

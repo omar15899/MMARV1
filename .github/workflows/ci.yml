@@ -1,0 +1,85 @@
+name: CI
+
+on:
+  push:
+    branches: [main, "feat/**", "fix/**"]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  UV_FROZEN: "1"
+
+jobs:
+  lint:
+    name: lint and types
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv sync --all-extras
+      - name: ruff check
+        run: uv run ruff check src tests examples
+      - name: ruff format --check
+        run: uv run ruff format --check src tests examples
+      - name: mypy --strict
+        run: uv run mypy
+
+  test:
+    name: tests (py${{ matrix.python }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv sync --all-extras --python ${{ matrix.python }}
+      - name: pytest
+        run: uv run pytest -m "not slow" --cov=mmar --cov-report=term-missing --cov-report=xml
+      - name: theory anchors must hold exactly
+        run: uv run pytest -m theory -q
+
+  reproducibility:
+    name: provenance roots are stable
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv sync --all-extras
+      - name: the same analysis must produce the same content address twice
+        run: |
+          uv run mmar analyze --estimator mfdfa --q=-3:3:9 --json-out a.json > /dev/null
+          uv run mmar analyze --estimator mfdfa --q=-3:3:9 --json-out b.json > /dev/null
+          uv run python - <<'PY'
+          import json, sys
+          a, b = (json.load(open(f))["root"] for f in ("a.json", "b.json"))
+          print(f"root A {a}\nroot B {b}")
+          sys.exit(0 if a == b else "provenance root is not reproducible")
+          PY
+      - name: a stored run must verify against its own manifest
+        run: |
+          uv run mmar analyze --estimator mfdfa --q=-3:3:9 --store artifacts --label ci > /dev/null
+          uv run mmar verify artifacts/run-ci.json > /dev/null
+
+  slow:
+    name: statistical validation (slow)
+    if: github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv sync --all-extras
+      - run: uv run pytest -m slow -q
