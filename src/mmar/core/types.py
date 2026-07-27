@@ -126,7 +126,7 @@ def log_spaced_scales(
     """
     if n < 16:
         raise ValueError(f"series too short for multifractal analysis: n={n}")
-    hi = int(s_max if s_max is not None else max(s_min + 1, math.floor(max_fraction * n)))
+    hi = s_max if s_max is not None else max(s_min + 1, int(max_fraction * n))
     if hi <= s_min:
         raise ValueError(f"empty scale range: s_min={s_min} >= s_max={hi}")
     raw = np.geomspace(s_min, hi, num=max(n_scales, 2))
@@ -135,7 +135,7 @@ def log_spaced_scales(
 
 def dyadic_scales(n: int, *, j_min: int = 3, j_max: int | None = None) -> NDArray[np.int64]:
     """Scales :math:`2^j`, the natural grid for wavelet-based estimators."""
-    top = int(math.floor(math.log2(n))) if j_max is None else j_max
+    top = math.floor(math.log2(n)) if j_max is None else j_max
     if top < j_min:
         raise ValueError(f"series too short: log2(n)={math.log2(n):.1f} < j_min={j_min}")
     return np.array([2**j for j in range(j_min, top + 1)], dtype=np.int64)
@@ -462,7 +462,8 @@ class LogCumulants:
         r"""Second-order spectrum :math:`f(\alpha)=d+(\alpha-c_1)^2/(2c_2)`."""
         if self.c2 >= 0:
             return np.full_like(alpha, np.nan)
-        return np.asarray(self.d_support + (alpha - self.c1) ** 2 / (2.0 * self.c2), dtype=np.float64)
+        parabola = self.d_support + (alpha - self.c1) ** 2 / (2.0 * self.c2)
+        return np.asarray(parabola, dtype=np.float64)
 
 
 @dataclass(frozen=True, slots=True)

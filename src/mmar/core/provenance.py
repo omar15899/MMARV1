@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import platform
 import sys
 from collections.abc import Iterable, Mapping, Sequence
@@ -41,7 +42,7 @@ _HASH: Final = "sha256"
 _DIGEST_CHARS: Final = 64
 
 
-def _canonicalise(obj: Any) -> Any:
+def _canonicalise(obj: Any) -> Any:  # noqa: PLR0911 - one branch per canonical form
     """Map an arbitrary parameter value onto a JSON-serialisable canonical form.
 
     Floats are emitted as their shortest round-tripping repr so that the digest
@@ -50,7 +51,7 @@ def _canonicalise(obj: Any) -> Any:
     if obj is None or isinstance(obj, bool | int | str):
         return obj
     if isinstance(obj, float):
-        if obj != obj:
+        if math.isnan(obj):
             return "__nan__"
         if obj == float("inf"):
             return "__inf__"
@@ -163,10 +164,10 @@ class EnvFingerprint:
 
     @classmethod
     def capture(cls) -> EnvFingerprint:
-        from mmar import __version__
+        from mmar import __version__  # noqa: PLC0415 - deferred to break a circular import
 
         try:
-            import scipy
+            import scipy  # noqa: PLC0415 - optional at import time, probed lazily
 
             scipy_v: str | None = scipy.__version__
         except ImportError:  # pragma: no cover - scipy is a hard dependency
@@ -322,7 +323,10 @@ class ArtifactStore:
             manifest["summary"] = json.loads(canonical_json(dict(summary)))
         if arrays:
             manifest["arrays"] = {k: array_digest(v) for k, v in sorted(arrays.items())}
-            np.savez_compressed(self.arrays / f"{root}.npz", **{k: np.asarray(v) for k, v in arrays.items()})
+            payload = {k: np.asarray(v) for k, v in arrays.items()}
+            # mypy resolves the ** into savez_compressed's `allow_pickle` parameter;
+            # the keys here are array names, never that flag.
+            np.savez_compressed(self.arrays / f"{root}.npz", **payload)  # type: ignore[arg-type]
         (self.manifests / f"{root}.json").write_text(json.dumps(manifest, indent=2, sort_keys=True))
         return root
 

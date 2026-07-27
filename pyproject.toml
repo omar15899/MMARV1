@@ -3,7 +3,7 @@ name = "mmar"
 version = "2.0.0"
 description = "Multifractal formalism engine: Holder spectra, cascade models and MMAR, with content-addressed provenance."
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 license = { text = "MIT" }
 authors = [{ name = "Omar Khalil" }]
 keywords = [
@@ -20,7 +20,6 @@ keywords = [
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Science/Research",
-    "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Topic :: Scientific/Engineering :: Mathematics",
@@ -63,7 +62,7 @@ packages = ["src/mmar"]
 
 [tool.ruff]
 line-length = 100
-target-version = "py311"
+target-version = "py312"
 src = ["src", "tests"]
 
 [tool.ruff.lint]
@@ -74,7 +73,7 @@ ignore = ["PLR0913", "PLR2004", "PLR0912", "PLR0915", "N803", "N806", "RUF002", 
 "tests/*" = ["PLR2004", "E501"]
 
 [tool.mypy]
-python_version = "3.11"
+python_version = "3.12"
 strict = true
 warn_unreachable = true
 disallow_any_generics = true

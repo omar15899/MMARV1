@@ -73,7 +73,13 @@ def spawn_rngs(seed: SeedLike, n: int) -> list[np.random.Generator]:
     if n < 0:
         raise ValueError(f"n must be non-negative, got {n}")
     if isinstance(seed, np.random.Generator):
-        children = seed.bit_generator.seed_seq.spawn(n)  # type: ignore[union-attr]
+        parent = seed.bit_generator.seed_seq
+        if not isinstance(parent, np.random.SeedSequence):
+            raise TypeError(
+                f"cannot spawn from a {type(parent).__name__}; the generator was built from a "
+                "custom ISeedSequence that does not support spawning. Pass an integer seed."
+            )
+        children = parent.spawn(n)
     else:
         children = _to_seed_sequence(seed).spawn(n)
     return [np.random.Generator(np.random.PCG64(child)) for child in children]

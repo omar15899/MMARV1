@@ -160,9 +160,9 @@ def loglog_fit(
     sxx_w = float(np.sum(w * (lx - xbar_w) ** 2))
     s2 = float(np.sum(w * resid**2) / dof) if dof > 0 else float("nan")
     slope_se = math.sqrt(s2 / sxx_w) if dof > 0 and sxx_w > 0 else float("nan")
-    intercept_se = (
-        math.sqrt(s2 * (1.0 / w.sum() + xbar_w**2 / sxx_w)) if dof > 0 and sxx_w > 0 else float("nan")
-    )
+    has_spread = dof > 0 and sxx_w > 0
+    leverage = 1.0 / w.sum() + xbar_w**2 / sxx_w if has_spread else float("nan")
+    intercept_se = math.sqrt(s2 * leverage) if has_spread else float("nan")
 
     if method is FitMethod.THEILSEN:
         ci = (float(lo_ts), float(hi_ts))
@@ -206,7 +206,9 @@ class SelectionResult:
 
     __slots__ = ("fit", "mask", "scaling_range")
 
-    def __init__(self, mask: NDArray[np.bool_], fit: LogLogFit, scaling_range: ScalingRange) -> None:
+    def __init__(
+        self, mask: NDArray[np.bool_], fit: LogLogFit, scaling_range: ScalingRange
+    ) -> None:
         self.mask = mask
         self.fit = fit
         self.scaling_range = scaling_range
@@ -260,12 +262,8 @@ def select_scaling_range(
                 continue
             width = hi - lo
             if criterion == "r2":
-                score = (
-                    (float(width), fit.r_squared)
-                    if fit.r_squared >= r2_threshold
-                    else (0.0, fit.r_squared)
-                )
-                key = score[0] * 1e6 + score[1]
+                reach = float(width) if fit.r_squared >= r2_threshold else 0.0
+                key = reach * 1e6 + fit.r_squared
             elif criterion == "bic":
                 rss = float(np.sum(fit.residuals**2))
                 bic = width * math.log(max(rss, 1e-300) / width) + math.log(width) * 2
