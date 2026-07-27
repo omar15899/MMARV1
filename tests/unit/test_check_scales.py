@@ -52,3 +52,24 @@ def test_invalid_scale_lists_are_rejected(bad: list[int], match: str) -> None:
 def test_a_series_too_short_for_any_scale_says_the_largest_admissible_one() -> None:
     with pytest.raises(DataQualityError, match="largest admissible scale is 16"):
         check_scales([100, 200], 64, min_windows=4)
+
+
+def test_the_constant_check_survives_extreme_magnitudes() -> None:
+    """Regression: `std(a) == 0` is not a constancy test at the ends of float64.
+
+    Observed: a strictly monotone ramp of magnitude 1e-300 has an exactly zero
+    sample variance (underflow), so it was rejected as constant; a ramp of
+    magnitude 1e300 overflows the variance to inf and emits a bare
+    RuntimeWarning, which this suite is configured to raise on. Order statistics
+    do neither.
+    """
+    from mmar.core.validate import DataQualityError, validate_series
+
+    for magnitude in (1e-300, 1e-3, 1.0, 1e300):
+        ramp = np.linspace(magnitude, 2 * magnitude, 128)
+        assert validate_series(ramp).size == 128, f"monotone ramp at {magnitude:g} rejected"
+
+    with pytest.raises(DataQualityError, match="constant"):
+        validate_series(np.full(128, 1e-300))
+    with pytest.raises(DataQualityError, match="constant"):
+        validate_series(np.full(128, 1e300))
