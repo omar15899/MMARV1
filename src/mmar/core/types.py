@@ -345,6 +345,8 @@ class SpectrumDescriptors:
     asymmetry: float
     curvature: float
     """Second derivative of the parabolic fit at :math:`\\alpha_0`."""
+    support_truncated: bool = False
+    """True when :math:`f` never reached the level, so ``width`` is a lower bound."""
 
     def to_canonical(self) -> dict[str, Any]:
         return {
@@ -354,7 +356,29 @@ class SpectrumDescriptors:
             "width": self.width,
             "f_max": self.f_max,
             "asymmetry": self.asymmetry,
+            "support_truncated": self.support_truncated,
         }
+
+
+def _crossing(a: FloatArray, f: FloatArray, level: float) -> tuple[float, bool]:
+    """First point where ``f`` crosses ``level``, walking outward from the apex.
+
+    ``a`` and ``f`` run from the apex toward one endpoint. Returns the linearly
+    interpolated crossing and whether one was actually found; when the curve
+    stops above ``level`` the endpoint is returned instead, and the caller must
+    treat the resulting width as a lower bound.
+    """
+    below = np.nonzero(f <= level)[0]
+    if below.size == 0:
+        return float(a[-1]), False
+    i = int(below[0])
+    if i == 0:
+        return float(a[0]), True
+    f_hi, f_lo = float(f[i - 1]), float(f[i])
+    if f_hi == f_lo:
+        return float(a[i]), True
+    w = (f_hi - level) / (f_hi - f_lo)
+    return float(a[i - 1] + w * (a[i] - a[i - 1])), True
 
 
 @dataclass(frozen=True, slots=True)
@@ -387,19 +411,40 @@ class HolderSpectrum:
             return float("nan")
         return float(self.alpha[finite][int(np.argmax(self.f_alpha[finite]))])
 
-    def descriptors(self) -> SpectrumDescriptors:
+    def descriptors(self, *, level: float = 0.0) -> SpectrumDescriptors:
+        r"""Scalar summary measured on the *support*, not on the sampled grid.
+
+        :math:`\alpha_{\min}` and :math:`\alpha_{\max}` are the crossings
+        :math:`f(\alpha)=\text{level}` either side of the apex, found by linear
+        interpolation. Reporting the extent of the :math:`\alpha` grid instead
+        would make :math:`\Delta\alpha` a function of the :math:`q` window
+        rather than of the process: widening :math:`q` extends the grid into the
+        region where :math:`f<0` and inflates the width without adding
+        information. Widths from different analyses would then not be
+        comparable, which is the usual reason published :math:`\Delta\alpha`
+        values disagree.
+
+        When the curve does not reach ``level`` on a side, that endpoint falls
+        back to the grid edge and ``support_truncated`` is set — the estimate is
+        then a lower bound on the true width.
+        """
         finite = np.isfinite(self.alpha) & np.isfinite(self.f_alpha)
         if finite.sum() < 3:
             nan = float("nan")
-            return SpectrumDescriptors(nan, nan, nan, nan, nan, nan, nan)
-        a, f = self.alpha[finite], self.f_alpha[finite]
-        a_min, a_max = float(a.min()), float(a.max())
-        a0 = float(a[int(np.argmax(f))])
+            return SpectrumDescriptors(nan, nan, nan, nan, nan, nan, nan, True)
+        order = np.argsort(self.alpha[finite])
+        a, f = self.alpha[finite][order], self.f_alpha[finite][order]
+        apex = int(np.argmax(f))
+        a0 = float(a[apex])
+
+        a_min, left_ok = _crossing(a[: apex + 1][::-1], f[: apex + 1][::-1], level)
+        a_max, right_ok = _crossing(a[apex:], f[apex:], level)
         left, right = a0 - a_min, a_max - a0
+
         curvature = float("nan")
         # A degenerate (monofractal) spectrum has zero alpha-spread, for which the
         # quadratic design matrix is singular; report NaN rather than a fitted artefact.
-        if a.size >= 3 and (a_max - a_min) > 1e-9 * max(1.0, abs(a0)):
+        if a.size >= 3 and (float(a.max()) - float(a.min())) > 1e-9 * max(1.0, abs(a0)):
             try:
                 with warnings.catch_warnings():
                     warnings.simplefilter("error", np.exceptions.RankWarning)
@@ -414,6 +459,7 @@ class HolderSpectrum:
             f_max=float(f.max()),
             asymmetry=float(left / right) if right > 0 else float("inf"),
             curvature=curvature,
+            support_truncated=not (left_ok and right_ok),
         )
 
     def evaluate(self, alpha: FloatArray) -> FloatArray:
