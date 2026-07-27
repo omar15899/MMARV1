@@ -330,7 +330,9 @@ def test_fbm_bias_is_systematic_not_a_lucky_seed() -> None:
         ("leaders", 0.65, 0.09, 0.10),
     ],
 )
-def test_mbm_ramp_is_tracked(name: str, min_corr: float, max_mae: float, max_resid_sd: float) -> None:
+def test_mbm_ramp_is_tracked(
+    name: str, min_corr: float, max_mae: float, max_resid_sd: float
+) -> None:
     r"""mBm with :math:`h(t)=0.3+0.4t`: the estimated profile must track it.
 
     Two claims, because the obvious one is treacherous. Correlation is *not* a

@@ -131,13 +131,9 @@ def _tau2_from(skeleton: WTMMSkeleton, field: np.ndarray) -> float:
     """
     keep = np.nonzero(skeleton.n_lines >= 4)[0]
     log_a = np.log(skeleton.scales[keep])
-    log_z = np.array(
-        [logsumexp(2.0 * np.log(field[skeleton.scale_index == j])) for j in keep]
-    )
+    log_z = np.array([logsumexp(2.0 * np.log(field[skeleton.scale_index == j])) for j in keep])
     w = weighted_by_counts(skeleton.n_lines[keep])
-    return loglog_fit(
-        np.exp(log_a), log_z, method=FitMethod.WLS, weights=w, log_y=False
-    ).slope
+    return loglog_fit(np.exp(log_a), log_z, method=FitMethod.WLS, weights=w, log_y=False).slope
 
 
 @pytest.mark.theory

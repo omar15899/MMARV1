@@ -46,14 +46,18 @@ def main(show_figures: bool = False) -> None:
     # ------------------------------------------------------------------ #
     diag = moment_existence(x, q=Q)
     lo, hi = diag.q_crit_ci
-    print(f"q_crit = {diag.q_crit:.2f}  (95% CI [{lo:.2f}, {hi:.2f}], "
-          f"from {diag.k_selected} order statistics)")
+    print(
+        f"q_crit = {diag.q_crit:.2f}  (95% CI [{lo:.2f}, {hi:.2f}], "
+        f"from {diag.k_selected} order statistics)"
+    )
     print(f"independent Hill estimate from the structure functions: {critical_moment_order(x):.2f}")
     inadmissible = Q[~np.asarray(diag.exists)]
     if inadmissible.size:
-        print(f"  NOTE: {inadmissible.size} of {Q.size} moments are inadmissible "
-              f"(|q| beyond q_crit={diag.q_crit:.2f}); those exponents describe the "
-              "sample extremes, not the process.")
+        print(
+            f"  NOTE: {inadmissible.size} of {Q.size} moments are inadmissible "
+            f"(|q| beyond q_crit={diag.q_crit:.2f}); those exponents describe the "
+            "sample extremes, not the process."
+        )
     print()
 
     # ------------------------------------------------------------------ #
@@ -105,8 +109,10 @@ def main(show_figures: bool = False) -> None:
         pointwise = oscillation_holder(x)
         run.record(pointwise, name="pointwise")
         rough = pointwise.singular_times(threshold=float(np.nanpercentile(pointwise.h, 1)))
-        print(f"pointwise h(t): median {np.nanmedian(pointwise.h):.3f}, "
-              f"1st percentile {np.nanpercentile(pointwise.h, 1):.3f}")
+        print(
+            f"pointwise h(t): median {np.nanmedian(pointwise.h):.3f}, "
+            f"1st percentile {np.nanpercentile(pointwise.h, 1):.3f}"
+        )
         print(f"  {rough.size} instants below the 1st percentile of local regularity")
         if series.t is not None and rough.size:
             idx = np.clip(np.asarray(pointwise.t)[rough].astype(int), 0, series.values.size - 1)
