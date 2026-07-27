@@ -337,6 +337,55 @@ def test_disjoint_increments_cost_time_reversal_symmetry() -> None:
     )
 
 
+def test_the_filter_based_estimators_are_only_approximately_reversal_symmetric() -> None:
+    r"""Bound the direction-dependence of MF-DMA, the leaders and WTMM.
+
+    On the deterministic binomial the truth is *exactly* reversal-invariant, and
+    provably so: reversing the array complements every dyadic digit, so a cell of
+    mass :math:`m_0^a m_1^{k-a}` becomes :math:`m_0^{k-a} m_1^a` and, since
+    :math:`\binom{k}{a}=\binom{k}{k-a}`, the multiset of cell masses --- hence
+    :math:`Z(q,\delta)` at every dyadic :math:`\delta`, hence :math:`\tau` ---
+    is unchanged. Any shift is therefore estimator error with no statistical
+    excuse, and it is measured here rather than assumed away
+    (:math:`\max_q|\Delta\zeta|` over :math:`q\in[-3,3]`)::
+
+        signal    mfdma(0)  mfdma(1/2)  leaders  wtmm
+        fBm         0.033      0.020      0.029   0.002
+        cascade     0.016      0.602      0.350   0.002
+
+    None of the three is exactly symmetric, and for good reasons: MF-DMA tiles
+    its residual into segments from index 0 and drops the tail, the causal
+    :math:`\theta=0` filter looks only backwards, and a Daubechies filter is
+    asymmetric by construction. WTMM's Gaussian-derivative kernel *is*
+    symmetric, which is why it comes back three orders of magnitude tighter.
+
+    The 0.35 for the leaders on the cascade is the documented db-phase
+    pathology (``docs/ESTIMATOR_GUIDE.md``: max :math:`|\Delta\zeta|` 0.05 for
+    ``db4`` against 1.43 for ``db6``) seen from a new angle: reading the same
+    measure backwards changes the answer by a third of an exponent. The bounds
+    below are the measured values with headroom; they exist so that a change
+    making any of these *more* direction-dependent is visible.
+    """
+    fbm_x = fbm_path()
+    cascade_x = cascade_path()
+    causal = functools.partial(mfdma, theta=0.0)
+    centred = functools.partial(mfdma, theta=0.5)
+
+    assert _reversal_gap(wtmm, fbm_x, Q) < 0.02
+    assert _reversal_gap(wtmm, cascade_x, Q) < 0.02
+    assert _reversal_gap(causal, fbm_x, Q) < 0.10
+    assert _reversal_gap(causal, cascade_x, Q) < 0.10
+    assert _reversal_gap(centred, fbm_x, Q) < 0.10
+
+    leaders_gap = _reversal_gap(wavelet_leaders, cascade_x, Q)
+    assert leaders_gap < 0.60, (
+        f"wavelet leaders now move by {leaders_gap:.3f} in zeta when the deterministic "
+        "cascade is read backwards, against a truth that is exactly reversal-invariant"
+    )
+    centred_gap = _reversal_gap(centred, cascade_x, Q)
+    assert centred_gap < 1.00, f"centred MF-DMA reversal gap on the cascade {centred_gap:.3f}"
+
+
 # --------------------------------------------------------------------------- #
 # (e) The reported scaling range must be the one that was fitted
 # --------------------------------------------------------------------------- #

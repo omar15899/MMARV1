@@ -140,9 +140,11 @@ def cmd_calibrate(args: argparse.Namespace) -> int:
     result = calibrate_from_spectrum(report.exponents, report.spectrum, base=args.base)
     print(result, file=sys.stderr)
     _emit({"series": name, **result.summary(), "diagnosis": list(result.diagnosis)}, args)
-    # An inadmissible calibration is a finding, not a crash, but it must not
-    # look like success to a shell script.
-    return 0 if result.admissible else 2
+    # An inadmissible calibration is a finding, not a crash, but it must not look
+    # like success to a shell script. Code 4, not 2: argparse exits 2 on any usage
+    # error, so a script branching on 2 could not tell "the MMAR specification was
+    # rejected by the data" from "you misspelled a flag".
+    return 0 if result.admissible else 4
 
 
 def cmd_simulate(args: argparse.Namespace) -> int:
@@ -180,7 +182,7 @@ def cmd_verify(args: argparse.Namespace) -> int:
     ok = all(results.values())
     print(manifest.describe(), file=sys.stderr)
     _emit({"manifest_root": manifest.root, "verified": ok, "nodes": results}, args)
-    return 0 if ok else 1
+    return 0 if ok else 5
 
 
 def cmd_replay(args: argparse.Namespace) -> int:
@@ -277,6 +279,11 @@ def build_parser() -> argparse.ArgumentParser:
     r.add_argument("manifest", help="path to a run-*.json manifest")
     r.set_defaults(func=cmd_replay)
 
+    parser.epilog = (
+        "exit codes: 0 success; 1 error; 2 argparse usage error; "
+        "3 missing optional dependency; 4 calibration inadmissible; "
+        "5 stored artifacts failed verification"
+    )
     return parser
 
 

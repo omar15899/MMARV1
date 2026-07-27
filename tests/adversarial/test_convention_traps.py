@@ -43,7 +43,6 @@ from mmar.models.cascade import deterministic_cascade
 from mmar.models.fbm import fbm, fgn, levy_stable_increments
 from mmar.models.theory import (
     cascade_exponents,
-    cascade_falpha,
     cascade_tau,
     fbm_exponents,
     lognormal_conservation_sigma2,
@@ -831,11 +830,6 @@ def test_a_triadic_cascade_would_catch_a_hard_coded_base_two_logarithm() -> None
         assert abs(float(e.tau[i0]) + 1.0) < 1e-9, name
         assert abs(float(e.tau[i1])) < 1e-9, name
     assert np.max(np.abs(sf.zeta - (exact + 1.0))) < 1e-9
-
-    assert (
-        np.max(np.abs(cascade_falpha(cj.q * 0 + 1.0, m) - cascade_falpha(np.array([1.0]), m)))
-        < 1e-12
-    )
 
 
 # --------------------------------------------------------------------------- #

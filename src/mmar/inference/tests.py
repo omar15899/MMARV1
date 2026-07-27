@@ -241,8 +241,13 @@ class MultifractalityReport:
         if s and i:
             return (
                 "NONLINEAR: neither the marginal distribution nor the linear "
-                "autocorrelation reproduces the statistic. This is the only combination "
-                "that is evidence of genuine multifractal structure."
+                "autocorrelation reproduces the statistic, so some nonlinear "
+                "dependence is required. This is the only combination consistent "
+                "with a cascade -- but it is NECESSARY, not sufficient: a GARCH(1,1) "
+                "reaches it too, with genuine nonlinear dependence and no "
+                "multiplicative cascade anywhere in it. To go further, compare the "
+                "estimated f(alpha) against a calibrated cascade's closed form "
+                "(mmar.calibration) rather than resting on this p-value."
             )
         return (
             "ANOMALOUS: the IAAFT null is rejected while the (weaker) shuffle null is not. "

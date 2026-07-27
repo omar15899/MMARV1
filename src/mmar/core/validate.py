@@ -8,6 +8,7 @@ Every public entry point in this library validates first.
 from __future__ import annotations
 
 import math
+import warnings
 from collections.abc import Sequence
 from typing import Any, Literal
 
@@ -219,9 +220,19 @@ def validate_q_grid(
             raise ValueError("the q grid collapsed to fewer than three distinct values")
     if exclude_zero:
         a = a[np.abs(a) > 1e-12]
-    if float(np.max(np.abs(a))) > warn_large:
-        # Not an error: some designs legitimately probe far tails.
-        pass
+    largest = float(np.max(np.abs(a)))
+    if largest > warn_large:
+        # Not an error: some designs legitimately probe far tails, and whether a
+        # moment exists is a property of the DATA, which this function has not
+        # seen. Point at the test that can answer it rather than guessing here.
+        warnings.warn(
+            f"the q grid reaches |q| = {largest:g}, beyond warn_large={warn_large:g}. "
+            "High moments need not exist: past q_crit the sample moment is a function "
+            "of the single largest increment, and its log-log plot is still straight. "
+            "Check with mmar.inference.tests.moment_existence before reading the "
+            "resulting exponents, or raise warn_large to silence this.",
+            stacklevel=2,
+        )
     # Always a copy: the grid is stored verbatim inside the result *and* inside
     # its provenance params, so aliasing the caller's array would let a later
     # `q[0] = ...` rewrite an already-published exponent curve and its root.

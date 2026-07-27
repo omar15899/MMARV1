@@ -582,7 +582,12 @@ class HolderSpectrum:
             try:
                 with warnings.catch_warnings():
                     warnings.simplefilter("error", np.exceptions.RankWarning)
-                    curvature = float(np.polyfit(a, f, 2)[0])
+                    # f'' of the quadratic fit, not its leading coefficient. The
+                    # docstring above, mmar.viz.diagnostics (which prints
+                    # 2.0 * coeffs[0]) and the identity f'' = 1/c_2 all agree on
+                    # the factor of two; without it the reported curvature is
+                    # exactly half the second derivative it claims to be.
+                    curvature = float(2.0 * np.polyfit(a, f, 2)[0])
             except (np.linalg.LinAlgError, ValueError, np.exceptions.RankWarning):
                 pass
         return SpectrumDescriptors(

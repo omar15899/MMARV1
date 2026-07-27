@@ -127,6 +127,7 @@ __all__ = [
     "MMARPath",
     "MMARSpec",
     "calibrate_mmar",
+    "default_oversample",
     "mmar_forecast_distribution",
     "mmar_zeta_lognormal",
     "simulate_ensemble",
@@ -754,9 +755,34 @@ def _simulate_path(
     return MMARPath(t=t, theta=theta, x=x, price=price, spec=spec, provenance=prov)
 
 
-def simulate_mmar(
-    spec: MMARSpec, *, seed: SeedLike, oversample: int = DEFAULT_OVERSAMPLE
-) -> MMARPath:
+def default_oversample(spec: MMARSpec, *, safety: float = 2.5, cap: int = 64) -> int:
+    r"""fBm grid refinement that keeps the chord-interpolation bias out of the path.
+
+    :math:`B_H` is sampled on a uniform grid in trading time and read off at
+    :math:`\theta(t_i)`. Wherever a cascade cell is smaller than the grid
+    spacing, the increment returned is a linear *chord* of the fBm rather than
+    an fBm increment, so it scales like :math:`\Delta\theta^{1}` instead of
+    :math:`\Delta\theta^{H}` --- biasing the large-:math:`\alpha` side of the
+    spectrum and shrinking :math:`|c_2|`.
+
+    The median cell mass of a conservative lognormal cascade at depth :math:`k`
+    is :math:`\prod_{j\le k}\operatorname{med}(M) = b^{-\lambda k}`, while the
+    grid spacing is :math:`b^{-k}/\text{oversample}`. Requiring the spacing to
+    sit below the median cell gives
+
+    .. math::  \text{oversample} \;>\; b^{\,k(\lambda-1)} ,
+
+    and ``safety`` covers the half of the cells below the median. The result is
+    capped: memory is linear in it, and at large ``kmax`` no affordable grid
+    resolves the smallest cells. When the cap binds the runtime warning still
+    fires, which is the honest signal that the path is chord-contaminated.
+    """
+    exponent = spec.kmax * max(spec.lam - 1.0, 0.0)
+    needed = safety * float(spec.b) ** exponent
+    return int(min(cap, max(DEFAULT_OVERSAMPLE, math.ceil(needed))))
+
+
+def simulate_mmar(spec: MMARSpec, *, seed: SeedLike, oversample: int | None = None) -> MMARPath:
     r"""Simulate one MMAR path :math:`X=B_H\circ\theta` on :math:`[0,1]`.
 
     The cascade and the fBm are drawn from two children of ``seed`` obtained
@@ -775,9 +801,12 @@ def simulate_mmar(
         Parent seed. Recorded in the provenance, so the path is reproducible
         bit-for-bit from the manifest alone.
     oversample
-        fBm grid points per physical sample. Larger values reduce the
-        chord-interpolation bias described in the module docstring, at linear
-        cost in memory.
+        fBm grid points per physical sample. ``None`` (the default) derives it
+        from the spec via :func:`default_oversample`, which is what keeps the
+        chord-interpolation bias out of the path; a fixed 8 warned on the
+        library's own documented settings at every depth, and a warning that
+        always fires is a warning nobody reads. Larger values cost linear
+        memory.
 
     Returns
     -------
@@ -786,6 +815,7 @@ def simulate_mmar(
         :math:`b^{k_{\max}}+1`.
     """
     spec.validate()
+    oversample = default_oversample(spec) if oversample is None else oversample
     if int(oversample) != oversample or oversample < 1:
         raise ValueError(f"oversample must be a positive integer, got {oversample!r}")
     rng_cascade, rng_fbm = spawn_rngs(seed, 2)
@@ -804,7 +834,7 @@ def simulate_ensemble(
     n_paths: int,
     *,
     seed: SeedLike,
-    oversample: int = DEFAULT_OVERSAMPLE,
+    oversample: int | None = None,
 ) -> list[MMARPath]:
     r"""``n_paths`` independent MMAR paths from a single parent seed.
 
@@ -817,6 +847,7 @@ def simulate_ensemble(
     spec.validate()
     if n_paths < 1:
         raise ValueError(f"n_paths must be at least 1, got {n_paths}")
+    oversample = default_oversample(spec) if oversample is None else oversample
     if int(oversample) != oversample or oversample < 1:
         raise ValueError(f"oversample must be a positive integer, got {oversample!r}")
 
@@ -923,7 +954,7 @@ def mmar_forecast_distribution(
     n_paths: int,
     *,
     seed: SeedLike,
-    oversample: int = DEFAULT_OVERSAMPLE,
+    oversample: int | None = None,
     quantile_levels: Sequence[float] = DEFAULT_QUANTILES,
     hill_fraction: float = 0.05,
 ) -> MMARForecast:
@@ -989,6 +1020,7 @@ def mmar_forecast_distribution(
     if levels.size == 0 or np.any(levels <= 0.0) or np.any(levels >= 1.0):
         raise ValueError("quantile_levels must be a non-empty set of levels strictly in (0, 1)")
 
+    oversample = default_oversample(spec) if oversample is None else oversample
     paths = simulate_ensemble(spec, n_paths, seed=seed, oversample=oversample)
     terminal = np.array([float(p.at(horizon)) for p in paths], dtype=np.float64)
     log_ret = np.asarray(np.log(terminal / spec.price0), dtype=np.float64)

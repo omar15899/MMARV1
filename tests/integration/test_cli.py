@@ -99,7 +99,27 @@ def test_verify_fails_on_a_tampered_manifest(
     )
     manifest = store / "run-t.json"
     manifest.write_text(manifest.read_text().replace('"mfdfa"', '"mfdfa_edited"', 1))
+    # 1, not 5: load_manifest refuses the document outright because its recorded
+    # root no longer matches its contents, which is a different failure from
+    # "the manifest is intact but the stored arrays do not match it".
     assert main(["verify", str(manifest)]) == 1
+
+
+def test_verify_reports_corrupted_arrays_separately_from_a_forged_manifest(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """An intact manifest whose payload was swapped must exit 5, not 1."""
+    store = tmp_path / "artifacts"
+    _run(
+        ["analyze", "--estimator", "mfdfa", "--q=-3:3:9", "--store", str(store), "--label", "t"],
+        capsys,
+    )
+    manifest = store / "run-t.json"
+    assert main(["verify", str(manifest)]) == 0
+
+    npz = next((store / "arrays").glob("*.npz"))
+    np.savez_compressed(npz, **{k: np.zeros(4) for k in np.load(npz).files})
+    assert main(["verify", str(manifest)]) == 5
 
 
 def test_replay_lists_the_nodes_in_dependency_order(
@@ -143,10 +163,31 @@ def test_calibrate_signals_inadmissibility_through_the_exit_code(
 ) -> None:
     """An inadmissible fit is a finding, but must not look like success to a shell."""
     code, payload = _run(["calibrate", "--q=-3:3:9"], capsys)
-    assert code in (0, 2)
+    assert code in (0, 4), "4, not 2: argparse owns 2 for usage errors"
     assert (code == 0) is payload["admissible"]
     assert {"H", "lambda", "sigma2", "diagnosis"} <= set(payload)
 
 
 def test_missing_input_file_is_a_clean_error() -> None:
     assert main(["analyze", "--input", "/nonexistent/nope.csv"]) == 1
+
+
+def test_exit_codes_are_distinct_and_documented() -> None:
+    """A shell script must be able to tell the failure modes apart.
+
+    Exit 2 belongs to argparse (any usage error), so an inadmissible
+    calibration cannot also be 2 without making `$? -eq 2` ambiguous between
+    "the MMAR specification was rejected by the data" and "you misspelled a
+    flag". The epilog documents the full set.
+    """
+    epilog = build_parser().epilog or ""
+    for code in ("0 success", "1 error", "2 argparse", "3 missing", "4 calibration", "5 stored"):
+        assert code in epilog, f"exit code {code!r} is undocumented"
+
+    res = subprocess.run(
+        [sys.executable, "-m", "mmar.cli", "analyze", "--nope"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert res.returncode == 2, "argparse usage errors must stay 2"

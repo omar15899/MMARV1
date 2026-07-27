@@ -22,7 +22,7 @@ import argparse
 
 import numpy as np
 
-from mmar.analysis import analyze, compare_estimators, consensus, spectrum_table
+from mmar.analysis import compare_estimators, consensus, spectrum_table
 from mmar.calibration import calibrate_from_spectrum
 from mmar.estimators import critical_moment_order, oscillation_holder, wavelet_leaders
 from mmar.inference import moment_existence, multifractality_report
@@ -124,7 +124,7 @@ def main(show_figures: bool = False) -> None:
         from mmar.viz import multifractal_dashboard, plot_comparison  # noqa: PLC0415
 
         multifractal_dashboard(primary)
-        fig, ax = plt.subplots(figsize=(7, 5))
+        _, ax = plt.subplots(figsize=(7, 5))
         plot_comparison({k: v.spectrum for k, v in reports.items()}, ax=ax)
         plt.show()
 
