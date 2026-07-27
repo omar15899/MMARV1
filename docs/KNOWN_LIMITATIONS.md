@@ -34,19 +34,61 @@ and choosing that threshold is a policy call. **Mitigation today:** the count is
 in `provenance.diagnostics["zeros_dropped"]`. Centre and scale a level series
 before analysing it.
 
-## 2. Wavelet estimators report a spectrum for a `C^∞` function
+## 2. Wavelet estimators fabricate a spectrum from round-off on a straight line
 
-**`tests/adversarial/test_mutation_coverage.py`**
+**`tests/adversarial/test_degenerate_inputs.py`** (strict xfail)
 
-Where the analysing wavelet annihilates the signal exactly — any polynomial of
-degree below its vanishing moments — the wavelet estimators fit float64
-round-off and return a confident, fully formed multifractal spectrum for a
-perfectly smooth function.
+The sharpest finding of the adversarial pass, and it hits the **default**
+estimator. Where the analysing wavelet annihilates the signal exactly — any
+polynomial of degree below its vanishing moments — the wavelet families fit
+float64 round-off and return a confident, fully formed multifractal spectrum
+for a perfectly smooth function.
 
-*Why not fixed:* detecting "the coefficients are round-off" needs a noise-floor
-threshold relative to the signal, which is a modelling choice. **Mitigation:**
-`N_ψ` is exposed and documented; a spectrum from a smooth signal shows up
-immediately in `consensus()` against a non-wavelet estimator.
+```python
+ramp = np.arange(4096, dtype=float) + 1.0     # alpha(t) = 1 everywhere, width 0
+
+analyze(ramp, estimator="wavelet_leaders")    # alpha_0 = 0.281,  width = 1.178
+analyze(ramp, estimator="wtmm")               # alpha_0 = 0.106,  width = 0.849
+leader_holder(ramp)                           # median h = 0.047
+oscillation_holder(ramp)                      # median h = 1.040   <- correct
+```
+
+`db3` has three vanishing moments, so the details of a ramp are *algebraically*
+zero. The measured interior coefficients run 4.3e-14 to 2.1e-12 against a signal
+of size 4.1e3 — relative 1e-16, pure round-off. Round-off in a linear filter
+grows with the analysing support, so `log|d|` against `j` is a clean straight
+line and the estimator is confident: `leader_holder` reports a median `R² =
+0.93`.
+
+Three things make it worse than a merely wrong number:
+
+- **It is not scale invariant.** `alpha_0` moves 0.233 → 0.281 → 0.300 as the
+  signal is multiplied by 1e-6, 1, 1e6 — the library's own stated invariant is
+  that every exponent is unchanged under `x → cx`.
+- **Noise of *relative* size 1e-15 flips the sign** of `leader_holder`'s median,
+  from +0.034 to −0.304.
+- **`support_truncated` fires but points the wrong way**: it is documented to
+  mean the width is a *lower* bound, and here the width should be zero.
+  `alpha_0` carries no qualification at all.
+
+A cubic — which `db3` does *not* annihilate — is answered correctly and
+saturates at exactly +3.000, so the machinery is sound; only the round-off floor
+is missing. `oscillation_holder`, which never divides by a vanishing quantity,
+returns +1.040 uniformly.
+
+**MF-DFA already refuses this exact input by name**, from an explicit
+`(s·eps)²·⟨w²⟩` floor in `_window_variances`:
+
+```
+scale s=20 leaves only 0 windows with a detrended variance above the round-off floor
+```
+
+*Why not fixed:* transporting that floor to a multiresolution coefficient needs
+a per-cell local-energy bound rather than a per-window one, and the file was
+under concurrent edit when the finding landed. It is a real fix and it is worth
+doing. **Mitigation today:** the xfail pins the behaviour, `consensus()` against
+MF-DFA exposes it immediately (MF-DFA raises where the wavelets answer), and
+`oscillation_holder` is trustworthy on smooth signals.
 
 ## 3. The chi-square monofractality test is not amplitude-invariant
 
