@@ -15,6 +15,7 @@ that one estimator is right.
 
 from __future__ import annotations
 
+import functools
 import math
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
@@ -214,8 +215,14 @@ def analyze(
     if surrogate_test:
         from mmar.inference.tests import multifractality_report  # noqa: PLC0415
 
+        # The surrogate ensemble must go through the *same* estimator configuration
+        # as the reported exponents. Handing over the bare registry callable instead
+        # would drop the caller's q grid and scales, and would drop _LEVEL_KWARGS --
+        # so mfdfa would integrate the already-integrated series a second time and
+        # the tested width would belong to a spectrum shifted by one whole exponent.
+        bound = functools.partial(fn, seed=seed, **kwargs)
         tests["surrogates"] = multifractality_report(
-            series, estimator=fn, n_surrogates=n_surrogates, seed=seed
+            series, estimator=bound, n_surrogates=n_surrogates, seed=seed
         )
 
     inputs = [InputRef.from_array("x", series)]
@@ -272,6 +279,10 @@ def compare_estimators(
     the wavelet families) by omitting that estimator, rather than failing the
     whole comparison. Anything else — a genuine estimation failure — propagates.
     """
+    if len(estimators) == 0:
+        # Otherwise the empty result falls through to the "nothing could run"
+        # branch below, which blames a missing optional dependency.
+        raise ValueError(f"estimators is empty; pass at least one of {sorted(ESTIMATORS)}")
     out: dict[str, MultifractalReport] = {}
     for name in estimators:
         try:

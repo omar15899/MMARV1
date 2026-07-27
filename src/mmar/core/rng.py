@@ -45,8 +45,16 @@ def make_rng(seed: SeedLike) -> np.random.Generator:
 
 
 def seed_info(seed: SeedLike) -> SeedInfo | None:
-    """The recoverable seed record, or ``None`` for a non-recoverable generator."""
-    if isinstance(seed, np.random.Generator):
+    """The recoverable seed record, or ``None`` when the stream is not recoverable.
+
+    ``None`` is returned for a live :class:`numpy.random.Generator` *and* for
+    ``seed=None``. In the latter case every consumer builds its own
+    :class:`~numpy.random.SeedSequence` from operating-system entropy, so a
+    :class:`SeedInfo` minted here would be an *unrelated* draw: writing it into
+    a manifest would claim a reproducibility that regenerates a different
+    stream. An absent seed is recorded as absent.
+    """
+    if seed is None or isinstance(seed, np.random.Generator):
         return None
     ss = _to_seed_sequence(seed)
     entropy = ss.entropy

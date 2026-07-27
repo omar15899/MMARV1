@@ -17,6 +17,7 @@ import json
 import math
 import platform
 import sys
+import zipfile
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
@@ -209,6 +210,16 @@ class Provenance:
     notes: tuple[str, ...] = ()
     diagnostics: Mapping[str, Any] = field(default_factory=dict)
 
+    def __post_init__(self) -> None:
+        """Copy the mappings in.
+
+        Without this the record aliases the caller's dict: mutating it after
+        construction retroactively changes ``root``, so an audit record already
+        written to a manifest stops matching its own address.
+        """
+        object.__setattr__(self, "params", dict(self.params))
+        object.__setattr__(self, "diagnostics", dict(self.diagnostics))
+
     @property
     def root(self) -> str:
         return digest_mapping(self._identifying())
@@ -345,13 +356,39 @@ class ArtifactStore:
         with np.load(path) as data:
             return {k: np.asarray(data[k]) for k in data.files}
 
+    @staticmethod
+    def _manifest_root_matches(root: str, manifest: Mapping[str, Any]) -> bool:
+        """Whether the manifest's identifying content still hashes to ``root``.
+
+        Without this the store is content-*named* rather than content-addressed:
+        the digest is only ever the filename, so editing ``params`` (or writing a
+        wholly fabricated manifest under a 64-hex name) leaves nothing to detect.
+        ``canonical_json`` is idempotent on its own output, so re-digesting the
+        serialised identifying block reproduces :attr:`Provenance.root` exactly.
+        """
+        identifying = ("estimator", "estimator_version", "params", "inputs", "env", "seed")
+        if any(k not in manifest for k in identifying):
+            return False
+        return digest_mapping({k: manifest[k] for k in identifying}) == root
+
     def verify(self, root: str) -> bool:
-        """Re-hash the stored arrays and confirm they match the recorded digests."""
+        """Re-hash the manifest and the stored arrays against the recorded digests.
+
+        Returns ``False`` for a manifest whose identifying fields no longer hash
+        to its own address, as well as for arrays that no longer match.
+        """
         manifest = self.get_manifest(root)
+        if len(root) != _DIGEST_CHARS or not self._manifest_root_matches(root, manifest):
+            return False
         recorded: Mapping[str, str] = manifest.get("arrays", {})
         if not recorded:
-            return len(root) == _DIGEST_CHARS
-        stored = self.get_arrays(root)
+            return True
+        try:
+            stored = self.get_arrays(root)
+        except (OSError, ValueError, zipfile.BadZipFile):
+            # A truncated or bit-flipped .npz is exactly the corruption this
+            # method exists to report; it must be a False, never a traceback.
+            return False
         if set(stored) != set(recorded):
             return False
         return all(array_digest(stored[k]) == d for k, d in recorded.items())

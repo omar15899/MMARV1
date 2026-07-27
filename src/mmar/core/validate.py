@@ -31,6 +31,20 @@ class DataQualityError(ValueError):
     """The input cannot support the requested estimate."""
 
 
+def _unmask(x: Sequence[float] | NDArray[Any]) -> Any:
+    """Turn a masked array's masked entries into NaN so ``nan_policy`` governs them.
+
+    ``np.asarray`` on a :class:`numpy.ma.MaskedArray` returns the *underlying
+    buffer* and discards the mask, so whatever the caller marked as missing --- a
+    fill value, a stale reading, an uninitialised cell --- would be analysed as
+    if it were data, silently. Routing it through NaN makes the gap visible to
+    the policy the caller already had to choose.
+    """
+    if isinstance(x, np.ma.MaskedArray):
+        return np.ma.filled(x.astype(np.float64), np.nan)
+    return x
+
+
 def validate_series(
     x: Sequence[float] | NDArray[Any],
     *,
@@ -45,9 +59,24 @@ def validate_series(
     provenance by the caller; it is never the default, because interpolation
     manufactures regularity and biases Hölder exponents *upward*.
     """
-    a = np.asarray(x, dtype=np.float64).ravel()
-    if a.ndim != 1:  # pragma: no cover - ravel guarantees 1-D
-        raise DataQualityError(f"{name} must be one-dimensional")
+    if nan_policy not in ("raise", "drop", "interpolate"):
+        # Not a defensive nicety: the dispatch below ends in an `else` that
+        # interpolates, so an unrecognised policy used to select the one branch
+        # that manufactures regularity.
+        raise ValueError(f"unknown nan_policy {nan_policy!r}; use 'raise', 'drop' or 'interpolate'")
+    if np.iscomplexobj(x):
+        raise DataQualityError(
+            f"{name} is complex; a Hölder exponent is defined for a real signal. "
+            "Casting would discard the imaginary part behind a ComplexWarning, so pass "
+            "x.real, x.imag or np.abs(x) explicitly."
+        )
+    a = np.asarray(_unmask(x), dtype=np.float64)
+    if a.ndim != 1:
+        raise DataQualityError(
+            f"{name} must be one-dimensional, got shape {a.shape}. Flattening a wider array "
+            "would interleave its columns into a sequence that never existed; pass a single "
+            "column (x[:, 0], df[col].to_numpy())."
+        )
     if a.size < min_length:
         raise DataQualityError(
             f"{name} has {a.size} points; at least {min_length} are needed for a "
@@ -70,7 +99,10 @@ def validate_series(
             idx = np.arange(a.size)
             a = np.interp(idx, idx[~bad], a[~bad])
 
-    if not allow_constant and float(np.std(a)) == 0.0:
+    # min == max, not std == 0: the variance of a series of magnitude 1e300 overflows
+    # (a bare RuntimeWarning) and that of a series of magnitude 1e-300 underflows to
+    # exactly zero, which would reject a strictly monotone ramp as "constant".
+    if not allow_constant and float(a.min()) == float(a.max()):
         raise DataQualityError(f"{name} is constant; every scaling exponent is degenerate")
     return np.ascontiguousarray(a)
 
@@ -87,7 +119,7 @@ def validate_measure(
     Zero cells are permitted (they are the support boundary) but are excluded
     from negative-:math:`q` moments by the estimators, which must say so.
     """
-    a = np.asarray(mu, dtype=np.float64).ravel()
+    a = np.asarray(_unmask(mu), dtype=np.float64).ravel()
     if not np.all(np.isfinite(a)):
         raise DataQualityError(f"{name} contains non-finite mass")
     if np.any(a < 0):
@@ -136,7 +168,10 @@ def validate_q_grid(
     if float(np.max(np.abs(a))) > warn_large:
         # Not an error: some designs legitimately probe far tails.
         pass
-    return np.ascontiguousarray(a)
+    # Always a copy: the grid is stored verbatim inside the result *and* inside
+    # its provenance params, so aliasing the caller's array would let a later
+    # `q[0] = ...` rewrite an already-published exponent curve and its root.
+    return np.array(a, dtype=np.float64, order="C", copy=True)
 
 
 def check_scales(
@@ -145,22 +180,37 @@ def check_scales(
     *,
     min_windows: int = 4,
     name: str = "scales",
+    basis: Literal["samples", "increments"] = "samples",
 ) -> NDArray[np.int64]:
-    """Drop scales that leave fewer than ``min_windows`` windows, and say so.
+    r"""Drop scales that leave fewer than ``min_windows`` windows, and say so.
 
     At :math:`n/s < 4` the fluctuation at scale :math:`s` is an average of three
     numbers; including such scales is the standard way of curving the top end of
     a log--log plot.
+
+    Parameters
+    ----------
+    basis
+        What the caller partitions. ``"samples"`` counts :math:`\lfloor n/s
+        \rfloor` windows, correct for MF-DFA-style segmentation of a profile.
+        ``"increments"`` counts :math:`\lfloor (n-1)/s \rfloor`, correct for any
+        estimator built from differences :math:`X(t+s)-X(t)`: there are
+        :math:`n-1` unit increments, not :math:`n`. The two differ by exactly
+        one whenever :math:`s \mid n`, which is precisely the coarse end of a
+        dyadic grid on a power-of-two series --- at :math:`n=2^{16},\ s=2^{14}`
+        the sample basis admits a scale yielding only three increments.
     """
     s = np.unique(np.asarray(scales, dtype=np.int64).ravel())
     if s.size == 0:
         raise ValueError(f"{name} is empty")
     if np.any(s < 2):
         raise ValueError(f"{name} must all be >= 2")
-    keep = (n // s) >= min_windows
+    available = n if basis == "samples" else n - 1
+    keep = (available // s) >= min_windows
     if not keep.any():
         raise DataQualityError(
-            f"no scale in {name} leaves >= {min_windows} windows for n={n}; the series is too short"
+            f"no scale in {name} leaves >= {min_windows} {basis[:-1]} windows for n={n} "
+            f"(largest admissible scale is {available // min_windows}); the series is too short"
         )
     return np.ascontiguousarray(s[keep])
 

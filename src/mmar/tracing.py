@@ -84,6 +84,15 @@ class TraceNode:
     created_utc: str = ""
 
     def to_canonical(self) -> dict[str, Any]:
+        """Identifying content of the node.
+
+        ``summary`` is included: it holds the numbers a reader of the manifest
+        actually acts on, so leaving it out of the Merkle root would let anyone
+        rewrite a reported ``h2`` in the JSON and still pass
+        :func:`load_manifest`. It is deterministic given the node's root, so it
+        does not disturb session-root reproducibility. ``created_utc`` stays out
+        — wall-clock time must never enter a digest.
+        """
         return {
             "name": self.name,
             "root": self.root,
@@ -91,6 +100,7 @@ class TraceNode:
             "estimator_version": self.estimator_version,
             "params": dict(self.params),
             "parents": list(self.parents),
+            "summary": dict(self.summary),
         }
 
 
@@ -295,7 +305,18 @@ class Run:
         TypeError
             If the object carries no provenance. An untraceable result has no
             place in a traced run; that is the point of the module.
+        ValueError
+            If ``name`` is already used in this run. Manifest queries resolve a
+            name to the first matching node, so a duplicate is an ambiguous
+            record rather than a second entry.
         """
+        if any(n.name == name for n in self._nodes):
+            raise ValueError(
+                f"this run already contains a node named {name!r}. Node names are how a "
+                "manifest is queried (RunManifest.by_name, ancestors, diff_manifests), all "
+                "of which return the first match, so a duplicate makes the record ambiguous "
+                "and hides the second result. Give it a distinct name."
+            )
         prov = getattr(result, "provenance", None)
         if not isinstance(prov, Provenance):
             raise TypeError(

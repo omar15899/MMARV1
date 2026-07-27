@@ -269,7 +269,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"missing optional dependency: {exc}", file=sys.stderr)
         print("install the extras with: pip install 'mmar[full]'", file=sys.stderr)
         return 3
-    except (ValueError, FileNotFoundError, KeyError) as exc:
+    # ArgumentTypeError derives from Exception, not ValueError: _q_grid raises it
+    # outside argparse's own type= machinery, so without it here a malformed --q
+    # leaves as a traceback instead of an exit code.
+    except (ValueError, FileNotFoundError, KeyError, argparse.ArgumentTypeError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
     return exit_code

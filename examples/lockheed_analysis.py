@@ -24,9 +24,10 @@ import numpy as np
 
 from mmar.analysis import analyze, compare_estimators, consensus, spectrum_table
 from mmar.calibration import calibrate_from_spectrum
-from mmar.estimators import critical_moment_order, oscillation_holder
+from mmar.estimators import critical_moment_order, oscillation_holder, wavelet_leaders
 from mmar.inference import moment_existence, multifractality_report
 from mmar.io import load_lockheed
+from mmar.io.loaders import days_to_datetime64
 from mmar.tracing import Run
 
 SEED = 20260727
@@ -43,14 +44,17 @@ def main(show_figures: bool = False) -> None:
     #    Above q_crit the log-log plot is still straight, but its slope is
     #    determined by the single largest increment rather than by the process.
     # ------------------------------------------------------------------ #
-    diag = moment_existence(np.diff(x), q=Q)
-    print(f"tail index of |returns|: {diag.tail_index:.2f} -> q_crit = {diag.q_critical:.2f}")
-    print(f"hill-based crossover from structure functions: {critical_moment_order(x):.2f}")
-    if diag.q_critical < float(Q.max()):
-        print(
-            f"  NOTE: the grid reaches q={Q.max():.0f} > q_crit; exponents beyond "
-            f"{diag.q_critical:.2f} describe the sample maximum, not the process.\n"
-        )
+    diag = moment_existence(x, q=Q)
+    lo, hi = diag.q_crit_ci
+    print(f"q_crit = {diag.q_crit:.2f}  (95% CI [{lo:.2f}, {hi:.2f}], "
+          f"from {diag.k_selected} order statistics)")
+    print(f"independent Hill estimate from the structure functions: {critical_moment_order(x):.2f}")
+    inadmissible = Q[~np.asarray(diag.exists)]
+    if inadmissible.size:
+        print(f"  NOTE: {inadmissible.size} of {Q.size} moments are inadmissible "
+              f"(|q| beyond q_crit={diag.q_crit:.2f}); those exponents describe the "
+              "sample extremes, not the process.")
+    print()
 
     # ------------------------------------------------------------------ #
     # 2. Four estimators, one series. Their disagreement is information.
@@ -78,10 +82,12 @@ def main(show_figures: bool = False) -> None:
         #    correlation. IAAFT keeps the linear autocorrelation too. A width
         #    that survives both is the only kind worth reporting.
         # -------------------------------------------------------------- #
-        surrogates = multifractality_report(
-            x, estimator="wavelet_leaders", n_surrogates=200, seed=SEED
-        )
-        print(surrogates)
+        surrogates = multifractality_report(x, wavelet_leaders, n_surrogates=200, seed=SEED)
+        print(f"observed {surrogates.statistic} = {surrogates.shuffle.statistic:.4f}")
+        for null in (surrogates.shuffle, surrogates.iaaft):
+            print(f"  vs {null.null_model:<8} p = {null.p_value:.4f}")
+        print(f"  verdict: {surrogates.verdict}")
+        print(f"  {surrogates.iaaft.interpretation}")
         print()
 
         # -------------------------------------------------------------- #
@@ -96,15 +102,16 @@ def main(show_figures: bool = False) -> None:
         # 5. Where in time is the roughness? This is what v1 could not do at
         #    all: an exponent per instant rather than their distribution.
         # -------------------------------------------------------------- #
-        pointwise = oscillation_holder(x, seed=SEED)
+        pointwise = oscillation_holder(x)
         run.record(pointwise, name="pointwise")
         rough = pointwise.singular_times(threshold=float(np.nanpercentile(pointwise.h, 1)))
-        dates = np.asarray(series.t)[rough] if series.t is not None else rough
         print(f"pointwise h(t): median {np.nanmedian(pointwise.h):.3f}, "
               f"1st percentile {np.nanpercentile(pointwise.h, 1):.3f}")
-        print(f"  {rough.size} roughest instants; first few at index {rough[:5].tolist()}")
-        if series.t is not None:
-            print(f"  e.g. {np.asarray(dates)[:3]}")
+        print(f"  {rough.size} instants below the 1st percentile of local regularity")
+        if series.t is not None and rough.size:
+            idx = np.clip(np.asarray(pointwise.t)[rough].astype(int), 0, series.values.size - 1)
+            when = days_to_datetime64(np.asarray(series.t)[np.unique(idx)])
+            print(f"  roughest dates: {', '.join(str(d)[:10] for d in when[:6])}")
         print()
 
     print(f"run manifest root {run.manifest_root}")

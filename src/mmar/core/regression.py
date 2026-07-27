@@ -100,6 +100,14 @@ def loglog_fit(
         non-positive values while ``log_y`` is true. Silently dropping those
         points is how spurious power laws get published.
     """
+    if not 0.0 < confidence < 1.0:
+        # t.ppf(0.5 + confidence/2) is silently NaN for confidence > 1 (the
+        # percent-for-fraction slip), infinite at 1 and negative below 0, which
+        # returns an inverted interval rather than raising.
+        raise ValueError(
+            f"confidence must be a probability in (0, 1), got {confidence!r}; "
+            "the 95% level is 0.95, not 95"
+        )
     xa = np.asarray(x, dtype=np.float64)
     ya = np.asarray(y, dtype=np.float64)
     if xa.shape != ya.shape:

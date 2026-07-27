@@ -36,7 +36,7 @@ from typing import Any
 
 import numpy as np
 
-from mmar.core.provenance import Provenance
+from mmar.core.provenance import InputRef, Provenance
 from mmar.core.types import FloatArray, HolderSpectrum, ScalingExponents
 
 __all__ = [
@@ -279,9 +279,18 @@ def calibrate_from_spectrum(
 
     prov = None
     if exponents.provenance is not None:
+        # The spectrum is a second input, not a function of the first: alpha_0 and
+        # the observed width come from it. Chaining only the exponents let two
+        # calibrations off different spectra share one content address.
+        spectrum_ref = (
+            InputRef.from_provenance("spectrum", spectrum.provenance)
+            if spectrum.provenance is not None
+            else InputRef.from_array("spectrum.f_alpha", spectrum.f_alpha)
+        )
         prov = exponents.provenance.derive(
             "mmar_calibration",
             params={"base": base, "hurst_override": hurst, "alpha0_override": alpha_0},
+            extra_inputs=[spectrum_ref],
         )
 
     return CalibrationResult(

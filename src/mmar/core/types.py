@@ -277,6 +277,15 @@ class ScalingExponents:
             raise ValueError(f"q{self.q.shape} and zeta{self.zeta.shape} must match")
         if self.q.size < 3:
             raise ValueError("at least three q values are required to build a spectrum")
+        if not self.d_support > 0.0:
+            # tau = zeta - d and f(alpha_0) = d are both linear in d, so a
+            # non-positive value shifts the whole spectrum with no other symptom.
+            # It is also geometrically empty: a support of dimension d has
+            # N(delta) = delta^{-d} boxes, which does not grow for d <= 0.
+            raise ValueError(
+                f"d_support must be positive, got {self.d_support!r}; it is the topological "
+                "dimension of the support (1 for a time series)"
+            )
 
     @property
     def tau(self) -> FloatArray:
@@ -570,16 +579,29 @@ class PointwiseHolder:
     def to_spectrum(self, bins: int = 50) -> HolderSpectrum:
         r"""Coarse histogram spectrum from the pointwise field.
 
-        This is a *descriptive* device, not the large-deviation spectrum: it
-        reports :math:`-\log_2 N(h)/\log_2 \delta`-style box counts only when a
-        scale is available, and otherwise a normalised density. Prefer
+        This is a *descriptive* device, not the large-deviation spectrum:
+        :math:`f(h)=\ln C(h)/\ln C_{\max}` with :math:`C` the bin **count**, the
+        histogram-method shape normalised so that the modal bin sits at
+        :math:`f=1=d` and the sparsest occupied bin at :math:`f=0`. Prefer
         :mod:`mmar.estimators.wavelet_leaders` for inference.
+
+        The count, not :func:`numpy.histogram`'s ``density``: a density falls
+        below 1 whenever the field is spread over more than :math:`e` units of
+        :math:`h`, which makes :math:`\ln C_{\max}` negative and *inverts* the
+        curve --- apex at the rarest exponent and :math:`f\gg d`, so the result
+        would leave the measure convention this class promises.
         """
         finite = np.isfinite(self.h)
-        counts, edges = np.histogram(self.h[finite], bins=bins, density=True)
+        counts, edges = np.histogram(self.h[finite], bins=bins)
         centres = 0.5 * (edges[:-1] + edges[1:])
-        with np.errstate(divide="ignore"):
-            f = np.where(counts > 0, np.log(counts) / np.log(counts.max()), np.nan)
+        peak = float(counts.max()) if counts.size else 0.0
+        if peak <= 1.0:
+            # Every occupied bin holds one sample: no bin is rarer than another and
+            # the normalisation is 0/0. NaN, rather than a curve made of infinities.
+            f = np.full(centres.shape, np.nan, dtype=np.float64)
+        else:
+            with np.errstate(divide="ignore"):
+                f = np.where(counts > 0, np.log(counts) / math.log(peak), np.nan)
         return HolderSpectrum(
             alpha=centres,
             f_alpha=np.asarray(f, dtype=np.float64),
