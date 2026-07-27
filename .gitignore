@@ -18,3 +18,8 @@ htmlcov/
 .env
 artifacts/
 !Readme.md
+
+# Spotlight: this tree churns thousands of build artefacts and indexing it
+# pinned mds_stores at ~200% CPU for hours. Belt and braces alongside
+# .metadata_never_index; the durable fix is `sudo mdutil -i off .`
+.metadata_never_index
