@@ -108,6 +108,29 @@ confidence intervals.
 statistic here: exactly zero for a monofractal, and far better conditioned than
 the width of a numerically Legendre-transformed curve.
 
+### What that gives on the library's own dataset
+
+`examples/lockheed_analysis.py`, on the Lockheed Martin series the original
+thesis used:
+
+```
+estimator                h(2)   alpha_0    width    asym       c2   defect
+mfdfa                  0.5104    0.5216   0.1697    3.00  -0.0103   0.0000
+mfdma                  0.5479    0.6049   0.4822    1.70  -0.0496   0.0000
+structure_function     0.5254    0.5828   1.1002    0.38  -0.1263   0.0002
+wavelet_leaders        0.4572    0.4831   0.1931    2.39  -0.0193   0.0000
+
+consensus: estimators DISAGREE: alpha_0 spread 0.122 > 0.1
+observed width = 0.1931   vs shuffle p = 0.567   vs iaaft p = 0.557
+verdict: NO EVIDENCE -- a series with the same marginal distribution and no
+time ordering at all already reproduces the statistic. Heavy tails, not
+multifractality.
+```
+
+Also flagged, before any of that: 26 of the 41 requested moments lie beyond
+`q_crit = 2.62`, so their exponents describe the sample extremes rather than
+the process. v1 reported a spectrum for this series and ran no such check.
+
 ---
 
 ## Models
