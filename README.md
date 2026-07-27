@@ -196,6 +196,19 @@ that removed the dataset, the notebook and the bibliography from `main`.
 
 ---
 
+## Documentation
+
+| | |
+|---|---|
+| `docs/ESTIMATOR_GUIDE.md` | which estimator to use, and every bias measured — sign, size, cause, remedy |
+| `docs/KNOWN_LIMITATIONS.md` | findings reported and deliberately **not** fixed, with the reason |
+| `docs/LEGACY_AUDIT.md` | what v1 got wrong, with numbers from running it |
+| `docs/BRANCHES.md` | branch topology and what the strip commit removed |
+| `docs/MIGRATION.md` | v1 → v2 map, and which numbers will move |
+| `docs/BIBLIOGRAPHY_legacy.md` | the thesis bibliography, recovered |
+
+---
+
 ## Repository layout
 
 ```
