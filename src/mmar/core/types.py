@@ -277,6 +277,18 @@ class ScalingExponents:
             raise ValueError(f"q{self.q.shape} and zeta{self.zeta.shape} must match")
         if self.q.size < 3:
             raise ValueError("at least three q values are required to build a spectrum")
+        # at(), h2 and hurst_tau_root all read q as an increasing abscissa.
+        # numpy.interp on a descending grid returns a number rather than raising,
+        # so a reversed surface is answered with a sign-flipped h(2) and no
+        # diagnostic. Every producer here already emits a sorted grid
+        # (validate_q_grid); a caller assembling one by hand must too.
+        if not np.all(np.isfinite(self.q)) or np.any(np.diff(self.q) <= 0.0):
+            raise ValueError(
+                "q must be strictly increasing and finite: zeta is matched to q "
+                "positionally and h2/at()/hurst_tau_root interpolate along q, so a "
+                "descending or duplicated grid is answered with a wrong number instead "
+                "of an error. Sort the grid and the zeta rows together."
+            )
         if not self.d_support > 0.0:
             # tau = zeta - d and f(alpha_0) = d are both linear in d, so a
             # non-positive value shifts the whole spectrum with no other symptom.
@@ -303,12 +315,25 @@ class ScalingExponents:
         return self.zeta if convention is Convention.SIGNAL else self.tau
 
     def at(self, q: float) -> float:
-        """:math:`\\zeta` interpolated at an arbitrary ``q`` (monotone grid assumed)."""
-        return float(np.interp(q, self.q, self.zeta))
+        r""":math:`\zeta` interpolated at an arbitrary ``q`` (monotone grid assumed).
+
+        NaN outside the fitted grid. :func:`numpy.interp` *clamps* by default,
+        which reports the endpoint as though it were the requested moment: on an
+        fBm with :math:`H=0.65` fitted over :math:`q\in[-1,1]`, ``at(2.0)``
+        returned :math:`\zeta(1)=0.66` and hence ``h2 = 0.33``, half the true
+        value, with nothing in the report to say the moment was never fitted. An
+        exponent outside the probed moment range is not an extrapolation
+        problem, it is an unmeasured quantity.
+        """
+        return float(np.interp(q, self.q, self.zeta, left=np.nan, right=np.nan))
 
     @property
     def h2(self) -> float:
-        r""":math:`h(2)=\zeta(2)/2`, the classical (second-order) Hurst exponent."""
+        r""":math:`h(2)=\zeta(2)/2`, the classical (second-order) Hurst exponent.
+
+        NaN when the fitted :math:`q` grid does not reach :math:`q=2`; see
+        :meth:`at`.
+        """
         return self.at(2.0) / 2.0
 
     @property
@@ -386,7 +411,14 @@ class SpectrumDescriptors:
     curvature: float
     """Second derivative of the parabolic fit at :math:`\\alpha_0`."""
     support_truncated: bool = False
-    """True when :math:`f` never reached the level, so ``width`` is a lower bound."""
+    """True when :math:`f` never crossed the level, so ``width`` is not a measurement.
+
+    Two distinct cases set it. Either :math:`f` stops *above* the level on a
+    side, so the true support extends past the grid and ``width`` is a lower
+    bound; or the apex itself lies at or below the level, so :math:`f` has no
+    support there at all and the reported ``width`` of zero is a collapse of the
+    estimate rather than the signature of a monofractal.
+    """
 
     def to_canonical(self) -> dict[str, Any]:
         return {
@@ -467,6 +499,14 @@ class HolderSpectrum:
         When the curve does not reach ``level`` on a side, that endpoint falls
         back to the grid edge and ``support_truncated`` is set — the estimate is
         then a lower bound on the true width.
+
+        The apex itself can also fall at or below ``level``, which happens
+        whenever the estimated :math:`\zeta` is convex (a non-stationary sample,
+        a divergent moment): the Legendre transform is then a tent lying wholly
+        below the axis. There is no crossing on either side, both endpoints
+        collapse onto the apex and ``width`` comes back as exactly zero — which
+        is the signature of a *perfect monofractal*. ``support_truncated`` is set
+        in that case too, so the two cannot be confused.
         """
         finite = np.isfinite(self.alpha) & np.isfinite(self.f_alpha)
         if finite.sum() < 3:
@@ -480,6 +520,10 @@ class HolderSpectrum:
         a_min, left_ok = _crossing(a[: apex + 1][::-1], f[: apex + 1][::-1], level)
         a_max, right_ok = _crossing(a[apex:], f[apex:], level)
         left, right = a0 - a_min, a_max - a0
+        # With the apex at or below the level, _crossing succeeds trivially on both
+        # sides at index zero and returns the apex twice. Without this the collapse
+        # is reported as width = 0 with no truncation flag, i.e. as a monofractal.
+        apex_supported = float(f[apex]) > level
 
         curvature = float("nan")
         # A degenerate (monofractal) spectrum has zero alpha-spread, for which the
@@ -488,7 +532,7 @@ class HolderSpectrum:
             try:
                 with warnings.catch_warnings():
                     warnings.simplefilter("error", np.exceptions.RankWarning)
-                    curvature = float(2.0 * np.polyfit(a, f, 2)[0])
+                    curvature = float(np.polyfit(a, f, 2)[0])
             except (np.linalg.LinAlgError, ValueError, np.exceptions.RankWarning):
                 pass
         return SpectrumDescriptors(
@@ -499,7 +543,7 @@ class HolderSpectrum:
             f_max=float(f.max()),
             asymmetry=float(left / right) if right > 0 else float("inf"),
             curvature=curvature,
-            support_truncated=not (left_ok and right_ok),
+            support_truncated=not (left_ok and right_ok and apex_supported),
         )
 
     def evaluate(self, alpha: FloatArray) -> FloatArray:
@@ -631,6 +675,10 @@ class MultifractalReport:
             "width": d.width,
             "asymmetry": d.asymmetry,
             "f_max": d.f_max,
+            # Without it the headline ``width`` cannot be told from a measurement:
+            # a collapsed spectrum reports exactly zero, which is also what an
+            # exact monofractal reports.
+            "support_truncated": d.support_truncated,
         }
         if self.cumulants is not None:
             out["c1"] = self.cumulants.c1

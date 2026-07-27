@@ -150,7 +150,13 @@ from mmar.core.types import (
     StructureFunctions,
     log_spaced_scales,
 )
-from mmar.core.validate import DataQualityError, check_scales, validate_q_grid, validate_series
+from mmar.core.validate import (
+    DataQualityError,
+    check_scales,
+    require_squarable,
+    validate_q_grid,
+    validate_series,
+)
 
 __all__ = [
     "dfa",
@@ -334,6 +340,9 @@ def mfdfa_structure(
     sa = _resolve_scales(xa.size, m, scales)
 
     y = _profile(xa, bool(integrate))
+    # The window variance below squares the profile; a record beyond 1.3e154
+    # overflows there behind a bare RuntimeWarning and carries inf into F_q.
+    require_squarable(y, name="MFDFA profile")
 
     values = np.empty((qa.size, sa.size), dtype=np.float64)
     counts = np.empty(sa.size, dtype=np.int64)

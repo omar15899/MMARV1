@@ -430,6 +430,8 @@ def leader_pyramid(
         running_max = cur
         if leaders:
             lam = cur.copy()
+            np.maximum(lam[:-1], cur[1:], out=lam[:-1])
+            np.maximum(lam[1:], cur[:-1], out=lam[1:])
         else:
             lam = cur
         if j not in admissible:
@@ -744,8 +746,14 @@ def _fit_rows(
     fit_method: FitMethod,
     select_range: bool,
     reference: int,
+    reference_name: str,
 ) -> tuple[tuple[LogLogFit, ...], ScalingRange, list[str]]:
-    """Fit every row of ``log_y`` against ``log(scales)`` over one common window."""
+    """Fit every row of ``log_y`` against ``log(scales)`` over one common window.
+
+    ``reference_name`` names the row the window was selected on, for the audit
+    record. It is the moment order (``"q=2"``), never its index into the grid: a
+    label reading ``q=28`` on a grid that stops at 5 misreports the fit.
+    """
     weights = weighted_by_counts(counts)
     notes: list[str] = []
     mask = np.ones(scales.size, dtype=bool)
@@ -766,7 +774,7 @@ def _fit_rows(
                 log_y=False,
             )
             mask = sel.mask
-            selection = f"auto-r2@q={reference}"
+            selection = f"auto-r2@{reference_name}"
 
     sx = scales[mask]
     sw = weights[mask]
@@ -844,6 +852,7 @@ def _exponents(
         fit_method=fit_method,
         select_range=select_range,
         reference=_reference_row(qa),
+        reference_name=f"q={float(qa[_reference_row(qa)]):g}",
     )
     zeta = np.asarray([f.slope for f in fits], dtype=np.float64)
     stderr = np.asarray([f.slope_stderr for f in fits], dtype=np.float64)
@@ -917,6 +926,7 @@ def exponents_from_structure(
         fit_method=fit_method,
         select_range=select_range,
         reference=_reference_row(structure.q),
+        reference_name=f"q={float(structure.q[_reference_row(structure.q)]):g}",
     )
     zeta = np.asarray([f.slope for f in fits], dtype=np.float64)
     prov = (
@@ -1361,6 +1371,7 @@ def leader_cumulants(
         fit_method=fit_method,
         select_range=select_range,
         reference=0,
+        reference_name="c1",
     )
     c = np.asarray([f.slope for f in fits], dtype=np.float64)
     stderr = np.asarray([f.slope_stderr for f in fits], dtype=np.float64)

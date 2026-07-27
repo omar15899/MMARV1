@@ -169,7 +169,12 @@ from mmar.core.types import (
     StructureFunctions,
     log_spaced_scales,
 )
-from mmar.core.validate import check_scales, validate_q_grid, validate_series
+from mmar.core.validate import (
+    check_scales,
+    require_squarable,
+    validate_q_grid,
+    validate_series,
+)
 
 __all__ = [
     "ESTIMATOR_ID",
@@ -408,6 +413,9 @@ def mfdma_structure(
     if not 0.0 <= zero_rtol < 1.0:
         raise ValueError(f"zero_rtol must lie in [0, 1); got {zero_rtol!r}")
     admissible, _ = _resolve_scales(y.size, scales, min_segments)
+    # The segment fluctuation below squares the residual; a record beyond 1.3e154
+    # overflows there behind a bare RuntimeWarning and carries inf into F_q.
+    require_squarable(y, name="MFDMA profile")
 
     values = np.empty((qa.size, admissible.size), dtype=np.float64)
     used = np.empty(admissible.size, dtype=np.int64)

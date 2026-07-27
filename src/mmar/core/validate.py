@@ -19,6 +19,7 @@ from mmar.core.types import FloatArray
 __all__ = [
     "NanPolicy",
     "check_scales",
+    "require_squarable",
     "validate_measure",
     "validate_q_grid",
     "validate_series",
@@ -26,9 +27,38 @@ __all__ = [
 
 NanPolicy = Literal["raise", "drop", "interpolate"]
 
+_SQUARABLE: float = math.sqrt(float(np.finfo(np.float64).max))
+r"""Largest :math:`|x|` whose square is representable, :math:`\approx1.34\times10^{154}`."""
+
 
 class DataQualityError(ValueError):
     """The input cannot support the requested estimate."""
+
+
+def require_squarable(a: FloatArray, *, name: str = "series") -> None:
+    r"""Refuse a series whose square is not representable in float64.
+
+    Any estimator that forms a *variance* --- MF-DFA's window residual, MF-DMA's
+    segment residual --- squares the data before taking any logarithm, so a
+    record reaching :math:`|x|>1.34\times10^{154}` overflows to :math:`\infty`
+    behind a bare ``RuntimeWarning`` and then carries the infinity into the
+    fluctuation function. The estimators that work entirely in the log domain
+    (GHE, the structure functions, the wavelet families) are unaffected and must
+    not be gated by this, which is why the check lives with the callers that
+    need it rather than in :func:`validate_series`.
+
+    The remedy the message quotes is exact, not a workaround: every exponent in
+    this library is invariant under :math:`x\mapsto cx`, which shifts the
+    intercept of each log--log fit and no slope.
+    """
+    peak = float(np.max(np.abs(a)))
+    if peak > _SQUARABLE:
+        raise DataQualityError(
+            f"{name} reaches |x| = {peak:.3g}, beyond {_SQUARABLE:.3g}: its square overflows "
+            "float64, so the second moment this estimator is built on is not computable. "
+            "Every exponent this library reports is invariant under x -> c*x, so rescale "
+            "(x / x.std()) and the answer is unchanged."
+        )
 
 
 def _unmask(x: Sequence[float] | NDArray[Any]) -> Any:
@@ -104,7 +134,13 @@ def validate_series(
     # exactly zero, which would reject a strictly monotone ramp as "constant".
     if not allow_constant and float(a.min()) == float(a.max()):
         raise DataQualityError(f"{name} is constant; every scaling exponent is degenerate")
-    return np.ascontiguousarray(a)
+    # Always an owned, writable copy. `np.ascontiguousarray` hands back the caller's
+    # own buffer for a contiguous float64 input, which (a) leaves every estimator one
+    # in-place operation away from rewriting the caller's data and (b) propagates a
+    # read-only flag -- a memory-mapped or deliberately frozen series then dies inside
+    # PyWavelets with "buffer source array is read-only", naming neither the input nor
+    # the remedy. The copy is O(n) against estimators that are O(n log n) at best.
+    return np.array(a, dtype=np.float64, order="C", copy=True)
 
 
 def validate_measure(
