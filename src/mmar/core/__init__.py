@@ -1,0 +1,81 @@
+"""Core contracts: types, conventions, provenance, regression, Legendre transforms."""
+
+from mmar.core.legendre import (
+    concave_envelope,
+    concavity_defect,
+    legendre_fenchel,
+    legendre_parametric,
+    spectrum_from_exponents,
+)
+from mmar.core.provenance import (
+    ArtifactStore,
+    InputRef,
+    Provenance,
+    SeedInfo,
+    array_digest,
+    new_provenance,
+)
+from mmar.core.regression import loglog_fit, select_scaling_range, weighted_by_counts
+from mmar.core.rng import make_rng, seed_info, spawn_rngs
+from mmar.core.types import (
+    Convention,
+    FitMethod,
+    FloatArray,
+    HolderSpectrum,
+    LogCumulants,
+    LogLogFit,
+    MultifractalReport,
+    PointwiseHolder,
+    ScalingExponents,
+    ScalingRange,
+    SpectrumDescriptors,
+    StructureFunctions,
+    dyadic_scales,
+    log_spaced_scales,
+)
+from mmar.core.validate import (
+    DataQualityError,
+    check_scales,
+    validate_measure,
+    validate_q_grid,
+    validate_series,
+)
+
+__all__ = [
+    "ArtifactStore",
+    "Convention",
+    "DataQualityError",
+    "FitMethod",
+    "FloatArray",
+    "HolderSpectrum",
+    "InputRef",
+    "LogCumulants",
+    "LogLogFit",
+    "MultifractalReport",
+    "PointwiseHolder",
+    "Provenance",
+    "ScalingExponents",
+    "ScalingRange",
+    "SeedInfo",
+    "SpectrumDescriptors",
+    "StructureFunctions",
+    "array_digest",
+    "check_scales",
+    "concave_envelope",
+    "concavity_defect",
+    "dyadic_scales",
+    "legendre_fenchel",
+    "legendre_parametric",
+    "log_spaced_scales",
+    "loglog_fit",
+    "make_rng",
+    "new_provenance",
+    "seed_info",
+    "select_scaling_range",
+    "spawn_rngs",
+    "spectrum_from_exponents",
+    "validate_measure",
+    "validate_q_grid",
+    "validate_series",
+    "weighted_by_counts",
+]

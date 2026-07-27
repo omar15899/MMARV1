@@ -1,25 +1,20 @@
-# Archivos temporales de Python
 __pycache__/
-*.pyc
-*.pyo
-
-# Archivos de entornos virtuales
-env/
+*.py[cod]
+*.so
+.venv/
 venv/
-
-# Archivos de configuración específicos del editor
+env/
+build/
+dist/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.DS_Store
 .vscode/
 *.code-workspace
-
-# Archivos de prueba o logs
-*.log
-*.txt
-.hidden/
-*.DS_Store
-
-
-# Excepto
-!Readme.md
-# Añadidos 2026-05-12
 .env
-.venv/
+artifacts/
+!Readme.md

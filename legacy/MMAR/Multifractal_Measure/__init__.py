@@ -1,0 +1,2 @@
+from .multifractal_measure_det import Binomial_Multifractal_Det
+from .multifractal_measure_rand import BinomialMultifractalRand
