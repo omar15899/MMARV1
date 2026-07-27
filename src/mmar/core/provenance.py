@@ -12,6 +12,7 @@ is testable: re-running a deterministic estimator must reproduce the root.
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import math
@@ -35,6 +36,7 @@ __all__ = [
     "SeedInfo",
     "array_digest",
     "canonical_json",
+    "digest_document",
     "digest_mapping",
     "new_provenance",
 ]
@@ -49,22 +51,26 @@ def _canonicalise(obj: Any) -> Any:  # noqa: PLR0911 - one branch per canonical 
     Floats are emitted as their shortest round-tripping repr so that the digest
     is stable across platforms; NaN/inf are tagged rather than silently coerced.
     """
-    if obj is None or isinstance(obj, bool | int | str):
+    if obj is None or isinstance(obj, bool | int):
         return obj
+    if isinstance(obj, str):
+        # A user string that spells a sentinel would otherwise be indistinguishable
+        # from the sentinel itself, so NaN and the string "__nan__" would collide.
+        return _escape(obj)
     if isinstance(obj, float):
         if math.isnan(obj):
-            return "__nan__"
+            return _NAN
         if obj == float("inf"):
-            return "__inf__"
+            return _INF
         if obj == float("-inf"):
-            return "__-inf__"
+            return _NEG_INF
         return repr(obj)
     if isinstance(obj, np.generic):
         return _canonicalise(obj.item())
     if isinstance(obj, np.ndarray):
-        return {"__array__": array_digest(obj), "shape": list(obj.shape), "dtype": obj.dtype.str}
+        return {_ARRAY: array_digest(obj), "shape": list(obj.shape), "dtype": obj.dtype.str}
     if isinstance(obj, Mapping):
-        return {str(k): _canonicalise(v) for k, v in sorted(obj.items(), key=lambda kv: str(kv[0]))}
+        return _canonicalise_mapping(obj)
     if isinstance(obj, Sequence | set | frozenset):
         items = sorted(obj, key=repr) if isinstance(obj, set | frozenset) else list(obj)
         return [_canonicalise(v) for v in items]
@@ -73,6 +79,64 @@ def _canonicalise(obj: Any) -> Any:  # noqa: PLR0911 - one branch per canonical 
     if hasattr(obj, "to_canonical"):
         return _canonicalise(obj.to_canonical())
     return {"__repr__": repr(obj), "__type__": type(obj).__qualname__}
+
+
+_NAN: Final = "__nan__"
+_INF: Final = "__inf__"
+_NEG_INF: Final = "__-inf__"
+_ARRAY: Final = "__array__"
+_SENTINELS: Final = frozenset({_NAN, _INF, _NEG_INF, _ARRAY, "__repr__", "__type__"})
+
+
+def _looks_numeric(text: str) -> bool:
+    """Whether a string would be indistinguishable from an emitted float."""
+    try:
+        float(text)
+    except ValueError:
+        return False
+    return True
+
+
+def _escape(text: str) -> str:
+    """Prefix an underscore onto any string that could be read as an emitted value.
+
+    The canonicaliser emits ``"__nan__"`` for NaN, ``{"__array__": ...}`` for an
+    array, and ``repr(v)`` for a finite float. Without escaping, a caller whose
+    parameter is literally the string ``"__nan__"``, or ``"1.5"``, or a dict with
+    an ``"__array__"`` key, canonicalises to the same bytes as the value and
+    therefore to the same content address. The encoding must be injective or the
+    digest is not an identity.
+
+    Injectivity: strings beginning ``_`` are escaped too, so the map is
+    ``t -> "_" + t`` on the escaped class and the identity off it. Two distinct
+    strings can only collide if one is ``"_" + other``, and then the second
+    begins with ``_`` and would itself have been escaped. Note the map is
+    deliberately *not* idempotent -- see :func:`digest_document`.
+    """
+    return "_" + text if text.startswith("_") or _looks_numeric(text) else text
+
+
+def _canonicalise_mapping(obj: Mapping[Any, Any]) -> dict[str, Any]:
+    """Canonicalise a mapping, refusing key collisions rather than losing entries.
+
+    Keys are stringified so that the encoding is JSON, which means ``1`` and
+    ``"1"`` map to the same key. Silently keeping one of them would drop a
+    parameter from the audit record *and* make two different computations share
+    a root, so the collision is an error.
+    """
+    out: dict[str, Any] = {}
+    seen: dict[str, Any] = {}
+    for key, value in sorted(obj.items(), key=lambda kv: str(kv[0])):
+        name = _escape(str(key))
+        if name in out:
+            raise ValueError(
+                f"parameter keys {seen[name]!r} and {key!r} both canonicalise to {name!r}; "
+                "one would be dropped from the provenance record and two different "
+                "computations would share a content address. Use distinct string keys."
+            )
+        seen[name] = key
+        out[name] = _canonicalise(value)
+    return out
 
 
 def canonical_json(obj: Any) -> str:
@@ -85,15 +149,44 @@ def array_digest(arr: NDArray[Any] | Sequence[float]) -> str:
 
     The digest binds dtype, shape and the C-contiguous byte image in a fixed
     (little-endian) byte order, so it is stable across machines.
+
+    An object-dtype array is refused: its buffer holds pointers, so hashing it
+    would mint a *different* address for the same content on every process.
     """
-    a = np.ascontiguousarray(arr)
+    a = np.asarray(arr)
+    if a.dtype.hasobject:
+        raise TypeError(
+            f"array_digest needs a numeric array; dtype={a.dtype!r} stores Python objects "
+            "whose in-memory bytes are addresses, so the digest would differ between two "
+            "runs on identical data and a manifest would never verify twice"
+        )
+    # Read the shape before densifying: ascontiguousarray promotes a 0-d array to
+    # shape (1,), which would give a scalar and a length-one vector one address.
+    shape = a.shape
+    a = np.ascontiguousarray(a)
     if a.dtype.byteorder == ">":
         a = a.astype(a.dtype.newbyteorder("<"))
     h = hashlib.new(_HASH)
     h.update(a.dtype.newbyteorder("<").str.encode())
-    h.update(repr(a.shape).encode())
+    h.update(repr(shape).encode())
     h.update(a.tobytes(order="C"))
     return h.hexdigest()
+
+
+def digest_document(doc: Any) -> str:
+    """Content address of an **already canonical** document.
+
+    :func:`_canonicalise` is deliberately *not* idempotent: a string that spells
+    a sentinel is escaped on every pass, which is what makes the encoding
+    injective. So anything that re-hashes the output of :func:`canonical_json`
+    --- a manifest read back from disk, a :class:`~mmar.tracing.TraceNode` whose
+    params were canonicalised at construction --- must re-encode with the same
+    JSON settings rather than canonicalise a second time. Otherwise a document
+    containing an array, a NaN or a ``__``-prefixed string hashes differently on
+    every round trip and honest manifests start failing verification.
+    """
+    encoded = json.dumps(doc, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+    return hashlib.new(_HASH, encoded.encode()).hexdigest()
 
 
 def digest_mapping(obj: Any) -> str:
@@ -211,14 +304,17 @@ class Provenance:
     diagnostics: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        """Copy the mappings in.
+        """Deep-copy the mappings in.
 
         Without this the record aliases the caller's dict: mutating it after
         construction retroactively changes ``root``, so an audit record already
-        written to a manifest stops matching its own address.
+        written to a manifest stops matching its own address. A shallow copy is
+        not enough, because the values that carry the numbers -- a list of
+        scales, a nested option dict, a ``q`` array -- stay shared, and mutating
+        one of those moves the root just as effectively as replacing a key.
         """
-        object.__setattr__(self, "params", dict(self.params))
-        object.__setattr__(self, "diagnostics", dict(self.diagnostics))
+        object.__setattr__(self, "params", copy.deepcopy(dict(self.params)))
+        object.__setattr__(self, "diagnostics", copy.deepcopy(dict(self.diagnostics)))
 
     @property
     def root(self) -> str:
@@ -363,13 +459,18 @@ class ArtifactStore:
         Without this the store is content-*named* rather than content-addressed:
         the digest is only ever the filename, so editing ``params`` (or writing a
         wholly fabricated manifest under a 64-hex name) leaves nothing to detect.
-        ``canonical_json`` is idempotent on its own output, so re-digesting the
-        serialised identifying block reproduces :attr:`Provenance.root` exactly.
+
+        The manifest already holds the *output* of :func:`canonical_json`, so it
+        is re-encoded with the same JSON settings rather than pushed through
+        :func:`_canonicalise` a second time. Canonicalisation is deliberately not
+        idempotent -- a string that spells a sentinel is escaped on every pass --
+        so re-canonicalising here would fail every artifact whose parameters
+        contain an array, a NaN, or a ``__``-prefixed string.
         """
         identifying = ("estimator", "estimator_version", "params", "inputs", "env", "seed")
         if any(k not in manifest for k in identifying):
             return False
-        return digest_mapping({k: manifest[k] for k in identifying}) == root
+        return digest_document({k: manifest[k] for k in identifying}) == root
 
     def verify(self, root: str) -> bool:
         """Re-hash the manifest and the stored arrays against the recorded digests.

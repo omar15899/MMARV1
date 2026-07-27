@@ -760,8 +760,14 @@ def spectrum_width(exponents: ScalingExponents) -> float:
     Computed through the Legendre--Fenchel transform, so it is the width of a
     genuinely concave spectrum and not of a folded parametric curve. Exactly
     zero for a monofractal, and the standard scalar summary of multifractality.
+
+    NaN when the spectrum has no support at all --- see
+    :func:`mmar.inference.tests.spectrum_statistic`, which applies the same rule.
+    :func:`surrogate_test` then refuses the test outright instead of placing a
+    collapsed estimate in a null distribution.
     """
-    return spectrum_from_exponents(exponents).descriptors().width
+    d = spectrum_from_exponents(exponents).descriptors()
+    return float(d.width) if d.f_max > 0.0 else float("nan")
 
 
 @dataclass(frozen=True, slots=True)

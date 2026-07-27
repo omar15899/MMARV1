@@ -61,6 +61,9 @@ def _lazy(module: str, name: str) -> Estimator:
         return fn(*args, **kwargs)
 
     call.__name__ = name
+    # The wrapper must be indistinguishable from its target to _registry_key, so
+    # that analyze(x, estimator=ESTIMATORS["mfdfa"]) is pinned like the name is.
+    call.__module__ = module
     return call
 
 
@@ -94,6 +97,34 @@ _LEVEL_KWARGS: Mapping[str, Mapping[str, Any]] = {
     "mfdma": {"integrate": False},
     "ghe": {"series_kind": "level"},
 }
+
+_REGISTRY_TARGETS: Mapping[tuple[str, str], str] = {
+    # Passing the estimator function itself is documented as equivalent to naming
+    # it, so it must not change the answer. Keyed by (module, __name__) rather
+    # than by identity because the registry holds lazy wrappers, and matching on
+    # the bare name alone would capture a caller's own function of that name.
+    ("mmar.estimators.mfdfa", "mfdfa"): "mfdfa",
+    ("mmar.estimators.mfdma", "mfdma"): "mfdma",
+    ("mmar.estimators.ghe", "generalised_hurst"): "ghe",
+    ("mmar.estimators.wavelet_leaders", "wavelet_leaders"): "wavelet_leaders",
+    ("mmar.estimators.wtmm", "wtmm"): "wtmm",
+    ("mmar.estimators.structure_function", "mfc_exponents"): "structure_function",
+}
+
+
+def _registry_key(estimator: str | Estimator, fn: Estimator) -> str | None:
+    """Registry name of ``estimator``, or ``None`` if it is a foreign callable.
+
+    Without this, :data:`_LEVEL_KWARGS` was applied only when the estimator was
+    named as a string: ``analyze(x, estimator=mfdfa)`` skipped the pin and
+    integrated the already-integrated series a second time, reporting
+    :math:`h(2)=1.667` where ``analyze(x, estimator="mfdfa")`` reports
+    :math:`0.658` on the same fBm --- the exact off-by-one the pin exists to
+    remove, reintroduced by how the estimator was spelt.
+    """
+    if isinstance(estimator, str):
+        return estimator
+    return _REGISTRY_TARGETS.get((getattr(fn, "__module__", ""), getattr(fn, "__name__", "")))
 
 
 def _to_level(x: FloatArray, kind: SeriesKind) -> FloatArray:
@@ -184,14 +215,15 @@ def analyze(
     """
     series = validate_series(x, nan_policy=nan_policy)  # type: ignore[arg-type]
     fn = get_estimator(estimator) if isinstance(estimator, str) else estimator
-    name = estimator if isinstance(estimator, str) else getattr(fn, "__name__", "custom")
+    key = _registry_key(estimator, fn)
+    name = key if key is not None else getattr(fn, "__name__", "custom")
 
     series = _to_level(series, kind)
 
     kwargs: dict[str, Any] = dict(estimator_kwargs)
-    if isinstance(estimator, str):
+    if key is not None:
         # Caller-supplied kwargs win, so an explicit integrate= is still honoured.
-        kwargs = {**_LEVEL_KWARGS.get(estimator, {}), **kwargs}
+        kwargs = {**_LEVEL_KWARGS.get(key, {}), **kwargs}
     if q is not None:
         kwargs["q"] = q
     if scales is not None:
@@ -238,7 +270,11 @@ def analyze(
             "surrogate_test": surrogate_test,
             "n_surrogates": n_surrogates if surrogate_test else None,
             "nan_policy": nan_policy,
-            **{k: v for k, v in kwargs.items() if not isinstance(v, np.ndarray)},
+            # Arrays are canonicalised by content digest, so the q grid and the
+            # scale set belong here. Filtering them out made the root blind to
+            # the moment grid: two analyses with different ndarray q returned
+            # different exponents under one content address.
+            **kwargs,
         },
         inputs=[InputRef.from_array("x", series)]
         + (
@@ -279,6 +315,14 @@ def compare_estimators(
     the wavelet families) by omitting that estimator, rather than failing the
     whole comparison. Anything else — a genuine estimation failure — propagates.
     """
+    if isinstance(estimators, str):
+        # A str satisfies Sequence[str], so estimators="mfdfa" iterates *characters*
+        # and the caller is told `unknown estimator 'm'` -- a name they never wrote.
+        raise ValueError(
+            f"estimators must be a sequence of names, not the single string {estimators!r}; "
+            f"iterating it would yield its characters. Pass [{estimators!r}], or use "
+            "analyze(x, estimator=...) for one estimator."
+        )
     if len(estimators) == 0:
         # Otherwise the empty result falls through to the "nothing could run"
         # branch below, which blames a missing optional dependency.

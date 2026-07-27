@@ -396,7 +396,24 @@ def spectrum_statistic(exponents: ScalingExponents, statistic: Statistic = "widt
         linear :math:`\zeta`. The most common statistic, and the most sensitive
         to the :math:`q` window: it measures the spread of :math:`\zeta'` over
         the *fitted* :math:`q` range only, so it is not an estimate of the true
-        support of :math:`f` unless :math:`q` is wide enough.
+        support of :math:`f` unless :math:`q` is wide enough. **NaN when the
+        apex of** :math:`f` **lies at or below the level the support is measured
+        at**, i.e. when
+        :attr:`~mmar.core.types.SpectrumDescriptors.support_truncated` is set by
+        an unsupported apex: :math:`\hat\zeta` is then convex, the Legendre
+        transform is a tent lying wholly below the axis, both crossings collapse
+        onto the apex and ``width`` comes back as exactly zero --- which is also
+        what an exact monofractal reports. Handing that zero to
+        :func:`multifractality_test` puts a *collapsed estimate* into the null
+        comparison as though it were a measurement. Measured on fBm at
+        :math:`H=0.3` concatenated with fBm at :math:`H=0.8` (n = 8192,
+        non-stationary, Gaussian increments, not multifractal anywhere):
+        :math:`f_{\max}=-0.208`, observed width 0.0, all 49 shuffle surrogates
+        strictly larger (null mean 0.059, minimum 0.016), :math:`p=1.000`, and
+        an ``interpretation`` reading "a randomly reordered copy ... reproduces
+        the observed statistic" --- which no surrogate did --- followed by the
+        verdict "Heavy tails, not multifractality" for a Gaussian path. The NaN
+        routes it to the "not finite on the data itself" guard instead.
     ``"c2"``
         The intermittency coefficient :math:`-c_2\ge0` from
         :func:`_log_cumulants_c2`. Exactly zero for a monofractal, and the least
@@ -412,7 +429,8 @@ def spectrum_statistic(exponents: ScalingExponents, statistic: Statistic = "widt
     through the identical code path.
     """
     if statistic == "width":
-        return float(spectrum_from_exponents(exponents).descriptors().width)
+        d = spectrum_from_exponents(exponents).descriptors()
+        return float(d.width) if d.f_max > 0.0 else float("nan")
     if statistic == "c2":
         return -_log_cumulants_c2(exponents.q, exponents.zeta)
     if statistic == "hq_range":

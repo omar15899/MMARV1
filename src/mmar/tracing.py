@@ -47,7 +47,7 @@ from mmar.core.provenance import (
     EnvFingerprint,
     Provenance,
     canonical_json,
-    digest_mapping,
+    digest_document,
 )
 
 __all__ = [
@@ -123,7 +123,11 @@ class RunManifest:
         same pipeline on the same inputs yields the same session root even though
         the timestamps differ.
         """
-        return digest_mapping(
+        # digest_document, not digest_mapping: TraceNode.params were canonicalised
+        # at construction, and canonicalisation is not idempotent by design, so a
+        # second pass would escape their sentinels again and the root would move on
+        # every save/load round trip.
+        return digest_document(
             {
                 "label": self.label,
                 "nodes": [n.to_canonical() for n in self.nodes],
@@ -168,10 +172,14 @@ class RunManifest:
             "finished_utc": self.finished_utc,
             "env": json.loads(canonical_json(self.env.to_canonical())),
             "notes": list(self.notes),
+            # No canonicalisation pass here: TraceNode canonicalises params and
+            # summary once, at construction. A second pass would escape their
+            # sentinels again (canonicalisation is injective, not idempotent) and
+            # the written document would no longer hash to `root`.
             "nodes": [
                 {
-                    **json.loads(canonical_json(n.to_canonical())),
-                    "summary": json.loads(canonical_json(dict(n.summary))),
+                    **n.to_canonical(),
+                    "summary": dict(n.summary),
                     "array_digests": dict(n.array_digests),
                     "created_utc": n.created_utc,
                 }
@@ -344,8 +352,10 @@ class Run:
                 # Canonicalise on the way in, so an in-memory manifest and one
                 # round-tripped through JSON compare equal parameter by parameter.
                 params=json.loads(canonical_json(dict(prov.params))),
+                # Canonicalised here for the same reason as params: the summary is
+                # part of the session root, so it must be encoded exactly once.
                 parents=tuple(i.digest for i in prov.inputs),
-                summary=dict(summary or _default_summary(result)),
+                summary=json.loads(canonical_json(dict(summary or _default_summary(result)))),
                 array_digests=dict(digests),
                 created_utc=prov.created_utc,
             )

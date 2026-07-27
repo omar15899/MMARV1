@@ -100,7 +100,25 @@ def validate_series(
             "Casting would discard the imaginary part behind a ComplexWarning, so pass "
             "x.real, x.imag or np.abs(x) explicitly."
         )
-    a = np.asarray(_unmask(x), dtype=np.float64)
+    try:
+        a = np.asarray(_unmask(x), dtype=np.float64)
+    except (TypeError, ValueError) as exc:
+        # numpy's own message names neither the argument nor the remedy: a
+        # generator gets "float() argument must be a string or a real number,
+        # not 'generator'" three frames deep, which reads as a library bug.
+        # Passing `(p for p in prices)` or a `{date: price}` dict is a routine
+        # slip and the answer is one call away.
+        raise DataQualityError(
+            f"{name} could not be read as a numeric sequence ({type(x).__name__}: {exc}). "
+            "Pass a 1-D sequence of real numbers -- a numpy array, a list, or a pandas "
+            "Series; a generator must be materialised first (np.fromiter(g, float)) and a "
+            "mapping reduced to its values in a defined order."
+        ) from exc
+    if a.ndim == 0:
+        raise DataQualityError(
+            f"{name} is a scalar ({type(x).__name__}), not a series; a scaling exponent is "
+            f"fitted across at least {min_length} ordered samples. Pass the whole path."
+        )
     if a.ndim != 1:
         raise DataQualityError(
             f"{name} must be one-dimensional, got shape {a.shape}. Flattening a wider array "

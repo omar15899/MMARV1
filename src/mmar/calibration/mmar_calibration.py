@@ -202,10 +202,18 @@ def calibrate_from_spectrum(
     a0 = float(desc.alpha_0) if alpha_0 is None else float(alpha_0)
 
     problems: list[str] = []
+    hurst_unidentified = not math.isfinite(H)
 
     if not math.isfinite(H):
+        # The estimated and the supplied H fail in the same place but for opposite
+        # reasons. Blaming tau when the caller passed hurst=nan names a defect the
+        # exponents do not have and sends them to widen a q grid that is already fine.
         problems.append(
-            "tau(q) has no root on the positive-q branch, so the MFC identity "
+            f"the hurst= override is {hurst!r}, which is not a finite number, so no "
+            "Hurst exponent entered the calibration. Pass a finite H in (0,1), or omit "
+            "hurst= to take it from the MFC identity tau(1/H)=0."
+            if hurst is not None
+            else "tau(q) has no root on the positive-q branch, so the MFC identity "
             "tau(1/H)=0 identifies no Hurst exponent. Widen the q grid, or pass "
             "hurst= explicitly from an independent estimator (e.g. h(2))."
         )
@@ -270,7 +278,13 @@ def calibrate_from_spectrum(
             )
 
     fatal = (
-        not math.isfinite(H)
+        # H was reassigned to h(2) above, so without this term the fallback launders a
+        # failed identification into `admissible=True`: the MFC identity tau(1/H)=0 --
+        # the thing this module calibrates -- identified nothing, yet to_spec_kwargs()
+        # would still hand back an MMARSpec and the CLI would still exit 0. The
+        # fallback H remains reported, in the field, for inspection.
+        hurst_unidentified
+        or not math.isfinite(H)
         or not 0.0 < H < 1.0
         or not math.isfinite(lam)
         or lam <= 1.0

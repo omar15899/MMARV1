@@ -724,6 +724,16 @@ def exponents_from_structure(
             },
             notes=("refit of a precomputed scaling surface; no moment recomputed",),
         )
+        # `derive` starts a fresh diagnostics map, so without this a refitted
+        # result no longer records how many exact zeros were dropped or how many
+        # moment cells overflowed -- the two facts that decide whether its
+        # negative-q branch means anything. Diagnostics never enter `root`.
+        prov = prov.with_diagnostics(
+            **{
+                **dict(structure.provenance.diagnostics),
+                "scaling_range": common_range.to_canonical(),
+            }
+        )
 
     return ScalingExponents(
         q=q,

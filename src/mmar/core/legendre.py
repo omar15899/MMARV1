@@ -23,10 +23,13 @@ support a multifractal reading, however pretty the resulting curve looks.
 
 from __future__ import annotations
 
+from typing import Any
+
 import numpy as np
 from numpy.typing import NDArray
 from scipy.interpolate import UnivariateSpline
 
+from mmar.core.provenance import array_digest
 from mmar.core.types import FloatArray, HolderSpectrum, ScalingExponents
 
 __all__ = [
@@ -134,6 +137,12 @@ def legendre_fenchel(
     qf = np.linspace(qs[0], qs[-1], max(q_refine, qs.size))
     zf = np.asarray(spl(qf), dtype=np.float64)
 
+    if alpha_grid is not None:
+        # Owned copy: the grid is returned as the spectrum's abscissa, so aliasing
+        # the caller's array would let a later `grid += ...` move alpha_0 and the
+        # width of a spectrum already computed, with the provenance root standing
+        # still -- and would hand the result's read-only flag back to the caller.
+        alpha_grid = np.array(alpha_grid, dtype=np.float64, order="C", copy=True)
     if alpha_grid is None:
         slopes = np.gradient(zf, qf)
         a_lo, a_hi = float(np.min(slopes)), float(np.max(slopes))
@@ -175,11 +184,17 @@ def spectrum_from_exponents(
     :func:`mmar.inference.bootstrap.bootstrap_spectrum`.
     """
     q, zeta, d = exponents.q, exponents.zeta, exponents.d_support
+    # Both of these change the curve that comes back -- alpha_grid fixes the
+    # abscissa and hence the reported width, clip_negative deletes the f<0 part --
+    # so both are causally identifying and must reach the digest. Recorded only
+    # when set, so the default path keeps the root it always had.
+    params: dict[str, Any] = {"method": method, "smoothing": smoothing, "n_alpha": n_alpha}
+    if alpha_grid is not None:
+        params["alpha_grid"] = array_digest(np.asarray(alpha_grid, dtype=np.float64))
+    if clip_negative:
+        params["clip_negative"] = True
     prov = (
-        exponents.provenance.derive(
-            "legendre",
-            params={"method": method, "smoothing": smoothing, "n_alpha": n_alpha},
-        )
+        exponents.provenance.derive("legendre", params=params)
         if exponents.provenance is not None
         else None
     )

@@ -8,9 +8,12 @@ descending, duplicated; and the two float64 traps of the trade --- a level
 series whose increments live below its own ulp, and a moment whose summands
 underflow.
 
-Two silently-wrong behaviours were found and fixed here; the rest of the file
-is a regression fence around behaviour that is already right and would be
-expensive to lose.
+Three silently-wrong behaviours were found and fixed here --- a fit-quality
+summary poisoned by the identically-degenerate :math:`q=0` row, a reversed
+:math:`q` axis answered with a sign-flipped :math:`h(2)`, and a scaling surface
+that returned the nearest row for a moment it had never computed. The rest of
+the file is a regression fence around behaviour that is already right and would
+be expensive to lose.
 """
 
 from __future__ import annotations
@@ -32,10 +35,11 @@ from mmar.core.types import (
     log_spaced_scales,
 )
 from mmar.core.validate import DataQualityError
-from mmar.estimators.ghe import generalised_hurst
+from mmar.estimators.ghe import generalised_hurst, generalised_hurst_structure
 from mmar.estimators.mfdfa import mfdfa
 from mmar.estimators.mfdma import mfdma
 from mmar.estimators.structure_function import (
+    critical_moment_order,
     exponents_from_structure,
     mfc_exponents,
     structure_functions,
@@ -126,6 +130,38 @@ def test_default_q_grid_leaves_a_finite_reported_r_squared(level: FloatArray) ->
         assert np.isfinite(reported), f"{name}: scaling_range.r_squared is {reported}"
         assert reported == pytest.approx(expected, abs=1e-12)
         assert 0.9 < reported <= 1.0
+
+
+@pytest.mark.parametrize("name", ["mfdfa", "mfdma"])
+def test_the_q_zero_logarithmic_branch_is_the_continuous_limit(
+    name: str, level: FloatArray
+) -> None:
+    r"""Attack: the :math:`0/0` branch that :math:`\zeta(0)=0` cannot see.
+
+    MF-DFA and MF-DMA form :math:`F_q=\big[\langle F_v^q\rangle\big]^{1/q}`,
+    which is :math:`0/0` at :math:`q=0` and must be replaced by
+    :math:`\ln F_0=\overline{\ln F_v}` --- the geometric mean, and in MF-DFA's
+    case :math:`\tfrac12\overline{\ln F_v^2}`, where dropping the one-half is
+    the classical slip. **Testing** :math:`\zeta(0)=0` **does not test this**:
+    both estimators fit :math:`h(q)` and carry :math:`\zeta=q\,h(q)`, so
+    :math:`\zeta(0)=0` holds identically whatever the branch returns, and
+    :attr:`~mmar.core.types.ScalingExponents.hq` is NaN at :math:`q=0` by
+    construction. The fitted :math:`h(0)` survives only inside ``fits``.
+
+    So the branch is probed where it is observable: against its own two-sided
+    limit. Measured here, :math:`h(0)` against the midpoint of
+    :math:`h(\pm10^{-3})`: 3.3e-10 (mfdfa, :math:`h(0)=0.622679`) and 2.5e-09
+    (mfdma, :math:`h(0)=0.748742`). Dropping the one-half doubles
+    :math:`\ln F_0` and with it the slope, which this tolerance rejects by seven
+    orders of magnitude.
+    """
+    fn, kwargs = SERIES_ESTIMATORS[name]
+    eps = 1e-3
+    exponents = fn(level, q=np.array([-eps, 0.0, eps]), **kwargs)
+    below, at_zero, above = (float(f.slope) for f in exponents.fits)
+
+    assert at_zero == pytest.approx(0.5 * (below + above), abs=1e-7)
+    assert min(below, above) <= at_zero <= max(below, above)
 
 
 @pytest.mark.parametrize("name", sorted(SERIES_ESTIMATORS))
@@ -231,6 +267,39 @@ def test_hand_built_exponents_refuse_a_descending_q_axis(level: FloatArray) -> N
         exponents_from_structure(reversed_surface)
 
 
+def test_structure_row_refuses_a_moment_that_is_not_on_the_grid(level: FloatArray) -> None:
+    r"""Attack: ask a scaling surface for a moment it never computed.
+
+    :meth:`StructureFunctions.row` located its row with ``argmin(|q_grid - q|)``
+    and returned it, so it answered *every* request, including ones no row
+    exists for. On ``q = arange(-5, 5.01, 0.3)`` --- a grid written without
+    noticing it steps over 2 --- ``row(2.0)`` returned the :math:`q=1.9` row,
+    and the :math:`h(2)` fitted from it came back **0.688337** against
+    **0.722039** from a grid containing 2: a 4.7 % error in the headline Hurst
+    exponent, under the label the caller asked for. Off the end of the grid the
+    snap is unbounded --- ``row(1000.0)`` returned the :math:`q=4.9` row.
+
+    This is the same defect class :meth:`ScalingExponents.at` was hardened
+    against (NaN outside the fitted range, not the clamped endpoint): a moment
+    that was never computed is not an interpolation problem.
+    """
+    q = np.arange(-5.0, 5.01, 0.3)
+    assert not np.any(q == 2.0)
+    scales = [8, 16, 32, 64, 128, 256]
+    surface = structure_functions(level, q=q, scales=scales)
+
+    with pytest.raises(ValueError, match="not on this surface's moment grid"):
+        surface.row(2.0)
+    with pytest.raises(ValueError, match="not on this surface's moment grid"):
+        surface.row(1000.0)
+
+    on_grid = structure_functions(level, q=np.array([-2.0, 0.0, 2.0]), scales=scales)
+    h2 = float(loglog_fit(on_grid.scales, on_grid.row(2.0)).slope) / 2.0
+    nearest = float(q[int(np.argmin(np.abs(q - 2.0)))])
+    h2_snapped = float(loglog_fit(surface.scales, surface.row(nearest)).slope) / 2.0
+    assert abs(h2 - h2_snapped) > 0.03, "the snapped row must be a materially different number"
+
+
 @pytest.mark.parametrize(
     "grid",
     [
@@ -281,6 +350,78 @@ def test_large_q_collapses_onto_the_single_largest_increment(level: FloatArray) 
     assert np.all(np.isfinite(exponents.zeta))
     assert np.all(np.diff(gap) < 0.0), f"h(q) must approach {one_point:.4f}, got {exponents.hq}"
     assert gap[-1] < 0.1 * gap[0]
+
+
+def test_ghe_large_q_collapses_onto_the_overlapping_one_point_exponent(
+    level: FloatArray,
+) -> None:
+    r"""Attack: the same collapse on the *overlapping* design, checked independently.
+
+    ``mfc`` averages over disjoint windows; GHE averages over every :math:`t`.
+    The large-:math:`q` limit is therefore the exponent of a different sample
+    maximum --- :math:`\max_t|X(t+\tau)-X(t)|` over the full overlapping set ---
+    and it is computed here from the series alone, without touching the
+    estimator's moment path. Measured on this seed with GHE's own
+    :math:`\tau\in[2,19]` grid and ``average_tau_max=False``: one-point exponent
+    0.64737, against :math:`h(q)` = 0.67841, 0.65301, 0.65137, 0.64922, 0.64800
+    at :math:`q=2,20,50,100,200`. The gap closes from 0.0310 to 0.0006, a factor
+    of 49, on a process whose :math:`h` is 0.7 at every :math:`q`. Two
+    independent window designs collapsing onto their own sample maximum is what
+    makes the effect a property of the moment, not of one implementation.
+    """
+    q = np.array([2.0, 20.0, 50.0, 100.0, 200.0])
+    surface = generalised_hurst_structure(level, q=q)
+    tau = surface.scales.astype(np.int64)
+    peaks = np.array(
+        [float(np.max(np.abs(level[int(t) :] - level[: -int(t)]))) for t in tau],
+        dtype=np.float64,
+    )
+    one_point = float(
+        loglog_fit(
+            tau.astype(np.float64),
+            peaks,
+            method=FitMethod.WLS,
+            weights=surface.counts.astype(np.float64),
+        ).slope
+    )
+    exponents = generalised_hurst(level, q=q, series_kind="level", average_tau_max=False)
+    gap = np.abs(exponents.hq - one_point)
+
+    assert np.all(np.isfinite(exponents.zeta))
+    assert np.all(np.diff(gap) < 0.0), f"h(q) must approach {one_point:.5f}, got {exponents.hq}"
+    assert gap[-1] < 0.05 * gap[0]
+
+
+@pytest.mark.parametrize("name", sorted(SERIES_ESTIMATORS))
+def test_the_unmeasurable_moment_is_still_reported_as_a_straight_line(
+    name: str, level: FloatArray
+) -> None:
+    r"""Attack: at :math:`q` far past :math:`q^\star`, does the fit look bad?
+
+    It does not, and that is the whole danger. :func:`critical_moment_order`
+    puts :math:`q^\star=7.75` on this path, so :math:`q=100` is thirteen times
+    past the largest moment the sample can carry; every estimator nonetheless
+    returns a finite exponent whose log--log fit has :math:`R^2\ge0.956`
+    (0.9666 mfc, 0.9563 mfdfa, 0.9924 mfdma, 0.9898 ghe). Meanwhile
+    :math:`h(q)` has walked away from :math:`h(2)` by 0.165 (mfc), 0.051
+    (mfdfa), 0.136 (mfdma) --- a fabricated multifractal spread on an exactly
+    monofractal process, with a fit-quality number that certifies it.
+
+    The moment order is a *precondition*, not something the regression can
+    detect: this test exists so that any future claim that a fit-quality
+    statistic guards the large-:math:`q` end is contradicted by a number.
+    """
+    fn, kwargs = SERIES_ESTIMATORS[name]
+    q = np.array([2.0, 5.0, 20.0, 50.0, 100.0])
+    q_star = critical_moment_order(level)
+    assert 5.0 < q_star < 12.0, f"q* moved to {q_star:.3f}; the premise needs rechecking"
+
+    exponents = fn(level, q=q, **kwargs)
+    r_squared = np.array([f.r_squared for f in exponents.fits], dtype=np.float64)
+
+    assert np.all(np.isfinite(exponents.zeta))
+    assert float(r_squared[-1]) > 0.95, f"{name}: R^2 at q=100 is {r_squared[-1]:.4f}"
+    assert exponents.hq[-1] < exponents.hq[0]
 
 
 def test_extreme_negative_moment_on_underflowing_increments_is_loud_or_exact(

@@ -304,7 +304,20 @@ def politis_white_block_length(x: Sequence[float] | NDArray[Any], *, c: float = 
     m_max = min(math.ceil(math.sqrt(n)) + k_n, n - 1)
     b_max = math.ceil(min(3.0 * math.sqrt(n), n / 3.0))
 
-    acov = _autocovariance(a, m_max)
+    # Every quantity below is a second or fourth power of the data, so the rule
+    # silently collapses long before float64 does: for fGn at H=0.8, n=2048 it
+    # returns b*=85 at unit scale and b*=1 for the same array times 1e-140,
+    # because g(0)^2 underflows even though g(0) itself is still representable.
+    # Below 1e-160 the variance itself underflows and acov[1:]/acov[0] is 0/0,
+    # a bare RuntimeWarning followed by b*=1 -- an i.i.d. bootstrap of a series
+    # with memory, which understates every interval it feeds
+    # (test_block_length_one_destroys_long_memory_variance measures by how much).
+    # The rule is exactly scale invariant: rho is a ratio of autocovariances and
+    # only G^2/g(0)^2 reaches b*. So it is evaluated on the series divided by a
+    # power of two -- exact, no round-off introduced -- and the two reported
+    # diagnostics, which do carry units of variance, are scaled back.
+    unit = math.ldexp(1.0, math.frexp(float(np.max(np.abs(a - a.mean()))))[1])
+    acov = _autocovariance(a / unit, m_max)
     rho = np.abs(acov[1:] / acov[0])
     threshold = c * math.sqrt(log10n / n)
 
@@ -339,6 +352,14 @@ def politis_white_block_length(x: Sequence[float] | NDArray[Any], *, c: float = 
 
     b_cb, trunc_cb = _optimum((4.0 / 3.0) * g_zero**2)
     b_sb, _ = _optimum(2.0 * g_zero**2)
+
+    # Back to the caller's units. Exact for any well-scaled series (unit is a
+    # power of two); at the extremes the product may itself under- or overflow,
+    # which is the honest report -- the block lengths above no longer depend on it.
+    with np.errstate(over="ignore", under="ignore"):
+        variance_unit = np.float64(unit) * np.float64(unit)
+        g_hat = float(np.float64(g_hat) * variance_unit)
+        g_zero = float(np.float64(g_zero) * variance_unit)
 
     return BlockLength(
         n=n,

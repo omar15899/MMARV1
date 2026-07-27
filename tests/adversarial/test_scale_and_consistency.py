@@ -37,7 +37,12 @@ from mmar.core.rng import make_rng
 from mmar.core.types import FloatArray, ScalingExponents
 from mmar.estimators.ghe import generalised_hurst
 from mmar.estimators.mfdfa import mfdfa, mfdfa_from_structure, mfdfa_structure
-from mmar.estimators.mfdma import mfdma, mfdma_exponents_from_structure, mfdma_structure
+from mmar.estimators.mfdma import (
+    mfdma,
+    mfdma_exponents_from_structure,
+    mfdma_residual,
+    mfdma_structure,
+)
 from mmar.estimators.structure_function import (
     exponents_from_structure as mfc_from_structure,
 )
@@ -601,16 +606,21 @@ def test_one_more_q_point_costs_less_than_one_copy_of_the_series(name: str) -> N
     arrays. Measured marginal cost between an 11-point and an 81-point grid at
     :math:`n=2^{16}`, in units of one float64 copy of the series::
 
-        mfdfa 0.00   structure_function 0.00   ghe 0.00
-        wtmm  0.35   wavelet_leaders    0.75   mfdma 0.77
+        before   mfdfa 0.00  structure_function 0.00  ghe 0.00
+                 wtmm  0.35  wavelet_leaders    0.75  mfdma 0.77
+        after    mfdfa 0.00  structure_function 0.00  ghe 0.00
+                 wtmm -0.00  wavelet_leaders   -0.03  mfdma 0.05
 
-    MF-DMA, the wavelet leaders and WTMM tilt an array of segment or
-    coefficient log-magnitudes for all :math:`q` at once, which is bounded by
-    the finest scale's segment count and stays under one series-copy per
-    :math:`q`. GHE used to tilt the *full-length* increment array at every lag
-    and scored 6.2 --- 2.14 GB on :math:`n=2^{20}` with the default grid. The
-    threshold sits between the two, so the class of defect cannot come back
-    anywhere.
+    MF-DMA, the wavelet leaders and WTMM tilted an array of segment or
+    coefficient log-magnitudes for *all* :math:`q` at once. That temporary is
+    :math:`n_q` times the finest scale's segment count, which is
+    :math:`\Theta(n)`, so the peak grew with the moment grid: 33 copies of the
+    series on the library's default 41-point grid, against 3.2 for the structure
+    function, which already reduced one :math:`q` at a time. GHE had the same
+    defect against the *full-length* increment array and scored 6.2 --- 2.14 GB
+    on :math:`n=2^{20}`. The threshold sits below every measured post-fix figure
+    and an order of magnitude below every pre-fix one, so the class of defect
+    cannot come back anywhere.
     """
     n = 1 << 16
     x = fbm_path(seed=2, n=n, hurst=0.6)
@@ -619,10 +629,248 @@ def test_one_more_q_point_costs_less_than_one_copy_of_the_series(name: str) -> N
     peak_small = _peak_bytes(functools.partial(fn, x, q=np.linspace(-5.0, 5.0, small)))
     peak_large = _peak_bytes(functools.partial(fn, x, q=np.linspace(-5.0, 5.0, large)))
     marginal = (peak_large - peak_small) / ((large - small) * 8 * n)
-    assert marginal < 1.5, (
+    assert marginal < 0.15, (
         f"{name}: every extra q point costs {marginal:.2f} copies of the series "
         f"({peak_small / 1e6:.1f} MB at n_q={small} -> {peak_large / 1e6:.1f} MB at n_q={large})"
     )
+
+
+def test_the_default_moment_grid_does_not_multiply_the_footprint() -> None:
+    r"""Peak allocation on the *library default* :math:`q` grid, per estimator.
+
+    The marginal test above is differential; this one pins the absolute figure a
+    user actually pays, because the default grid is 41 points and that is where
+    an :math:`O(n_q n)` temporary does its damage. Measured at :math:`n=2^{18}`
+    in copies of the float64 series (2.1 MB)::
+
+        before   mfc 3.2   leaders 32.8   mfdma 33.5   wtmm 33.6
+        after    mfc 3.2   leaders  4.5   mfdma  6.1   wtmm 33.6
+
+    WTMM stays at 33.6 and is *not* a violation: its peak is the
+    :math:`(n_\text{scales}\times n)` continuous wavelet transform, which is the
+    estimator's definition and grows with the *scale* grid, not with :math:`q`.
+    The bound below is 12, which passes everything whose footprint is set by the
+    data and fails anything whose footprint is set by the moment grid.
+    """
+    n = 1 << 18
+    x = fbm_path(seed=4, n=n, hurst=0.6)
+    for name in ("mfdma", "wavelet_leaders", "structure_function", "mfdfa"):
+        peak = _peak_bytes(functools.partial(ESTIMATORS[name], x))
+        copies = peak / (8 * n)
+        assert copies < 12.0, (
+            f"{name}: peak {peak / 1e6:.1f} MB = {copies:.1f} copies of the series on the "
+            "default 41-point q grid; the moment grid is being materialised against the samples"
+        )
+
+
+# --------------------------------------------------------------------------- #
+# (j) The refit path must be the same *record*, not only the same numbers
+# --------------------------------------------------------------------------- #
+
+
+def _leaders_pair(x: FloatArray, q: FloatArray) -> tuple[ScalingExponents, ScalingExponents]:
+    return wavelet_leaders(x, q=q), leaders_from_structure(wavelet_leaders_structure(x, q=q))
+
+
+def _mfdfa_pair(x: FloatArray, q: FloatArray) -> tuple[ScalingExponents, ScalingExponents]:
+    return (
+        mfdfa(x, q=q, integrate=False),
+        mfdfa_from_structure(mfdfa_structure(x, q=q, integrate=False)),
+    )
+
+
+def _mfdma_pair(x: FloatArray, q: FloatArray) -> tuple[ScalingExponents, ScalingExponents]:
+    return mfdma(x, q=q), mfdma_exponents_from_structure(mfdma_structure(x, q=q))
+
+
+def _mfc_pair(x: FloatArray, q: FloatArray) -> tuple[ScalingExponents, ScalingExponents]:
+    return mfc_exponents(x, q=q), mfc_from_structure(mfc_exponents_structure(x, q=q))
+
+
+_PAIRS: dict[str, Callable[[FloatArray, FloatArray], tuple[ScalingExponents, ScalingExponents]]] = {
+    "wavelet_leaders": _leaders_pair,
+    "mfdfa": _mfdfa_pair,
+    "mfdma": _mfdma_pair,
+    "structure_function": _mfc_pair,
+}
+
+
+@pytest.mark.parametrize("name", sorted(_PAIRS))
+def test_the_refit_path_reports_every_diagnostic_the_direct_path_does(name: str) -> None:
+    """A cheap path that drops the warning flags is not the same computation.
+
+    ``Provenance.derive`` starts a *fresh* diagnostics map, and three of the four
+    refit functions never re-attached the parent's. The exponents came back
+    bit-identical, so nothing looked wrong, while the audit record lost:
+
+    * ``saturated`` and ``saturation_margin`` (wavelet leaders) --- the flag that
+      says the reported :math:`\\alpha_{\\max}` is the analysing wavelet's
+      :math:`N_\\psi` ceiling rather than the data's regularity, i.e. that the
+      right branch of :math:`f(\\alpha)` is an artefact;
+    * ``degenerate_windows`` (MF-DFA) --- windows the polynomial fitted exactly,
+      whose zero residual drives every negative moment;
+    * ``zeros_dropped`` and ``n_nonfinite_values`` (structure function) --- how
+      much of the sample was discarded before the moments were taken.
+
+    Measured before the fix: ``exponents_from_structure`` returned
+    ``provenance.diagnostics == {}`` for all three, against 16, 3 and 4 keys on
+    the direct path. MF-DMA and WTMM already carried them forward, each with a
+    comment saying it was necessary --- so this was an inconsistency, not a
+    design choice. Diagnostics are non-identifying, so restoring them cannot
+    move any content address.
+    """
+    x = fbm_path(seed=19, n=1 << 13)
+    direct, refit = _PAIRS[name](x, Q)
+    np.testing.assert_array_equal(refit.zeta, direct.zeta, err_msg=f"{name}: refit != direct")
+    assert direct.provenance is not None
+    assert refit.provenance is not None
+    lost = sorted(set(direct.provenance.diagnostics) - set(refit.provenance.diagnostics))
+    assert not lost, f"{name}: the refit path lost the diagnostics {lost}"
+
+
+def test_the_leaders_refit_records_that_range_selection_was_skipped() -> None:
+    """``select_range=True`` that could not run must say so on *both* paths.
+
+    With fewer than five octaves the leader fitter cannot select a window and
+    silently uses all of them. The direct path records that in
+    ``diagnostics['notes']``; the refit path discarded the note, so a caller who
+    asked for an automatically chosen scaling range and got the full one had
+    nothing anywhere in the record to say the request had been dropped ---
+    ``selection`` reads ``"manual"`` either way, which is exactly what an
+    honest manual fit reads. At :math:`n=1024` the octaves are
+    :math:`\\{8,16,32,64\\}`, so this is the ordinary short-record case.
+    """
+    x = fbm_path(seed=23, n=1024)
+    structure = wavelet_leaders_structure(x, q=Q)
+    assert structure.scales.size < 5
+    refit = leaders_from_structure(structure, select_range=True)
+    assert refit.scaling_range is not None
+    assert refit.scaling_range.selection == "manual"
+    assert refit.provenance is not None
+    notes = refit.provenance.diagnostics.get("notes")
+    assert notes, "the refit dropped the range-selection request without recording it"
+    assert any("select_range" in str(n) for n in notes), notes
+
+
+# --------------------------------------------------------------------------- #
+# (k) Two computations that must be the same computation
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize("name", NAMES)
+def test_passing_the_scales_the_estimator_chose_changes_nothing(name: str) -> None:
+    """The default scale grid must be reachable by hand, bit for bit.
+
+    Every estimator resolves ``scales=None`` to a grid and then filters it
+    (admissible window counts, contiguity, line starvation). Handing that
+    *resolved* grid back in must reproduce the run exactly. If it does not, the
+    filtering is not idempotent -- the second pass drops or keeps a scale the
+    first did not -- and the ``scales`` recorded in provenance is then not the
+    grid that produced the number, which makes the record unusable for
+    reproducing it.
+    """
+    fn = ESTIMATORS[name]
+    x = fbm_path(seed=29, n=1 << 13)
+    base = fn(x, q=Q)
+    assert base.structure is not None
+    used = np.asarray(np.rint(base.structure.scales), dtype=np.int64)
+    again = fn(x, q=Q, scales=used)
+    np.testing.assert_array_equal(again.zeta, base.zeta, err_msg=f"{name}: scales not idempotent")
+
+
+@pytest.mark.parametrize("name", NAMES)
+def test_analyze_reproduces_the_bare_estimator_bit_for_bit(name: str) -> None:
+    """``analyze`` must add a spectrum, not a second opinion on the exponents.
+
+    It rewrites the caller's kwargs (``_LEVEL_KWARGS`` pins ``integrate`` and
+    ``series_kind``) and re-validates the series. Any of that touching the
+    numbers would mean the headline in a report and the exponents a user gets
+    from the estimator directly are different estimates of the same quantity,
+    with nothing to say which one was published.
+    """
+    x = fbm_path(seed=31, n=1 << 13)
+    direct = ESTIMATORS[name](x, q=Q).zeta
+    through = analyze(x, estimator=name, q=Q, cumulants=False).exponents.zeta
+    np.testing.assert_array_equal(through, direct, err_msg=f"{name}: analyze != direct")
+
+
+def test_the_backward_and_forward_moving_averages_are_mirror_images() -> None:
+    r"""MF-DMA's window index derivation, checked against its own symmetry.
+
+    With :math:`L=\lfloor(n-1)\theta\rfloor` the window attached to point
+    :math:`i` is :math:`[\,i-(n-1-L),\ i+L\,]`. Reversing time maps the
+    :math:`\theta=0` window :math:`[i-(n-1),\,i]` onto the :math:`\theta=1`
+    window :math:`[i',\,i'+n-1]` at :math:`i'=N-1-i`, so
+
+    .. math::
+        \varepsilon_{\theta=0}(Y)\;=\;
+        \operatorname{rev}\big[\varepsilon_{\theta=1}(\operatorname{rev} Y)\big]
+
+    exactly, to round-off. This is the sharpest available check on the offset
+    :math:`i_0=n-1-L`: an off-by-one there compares each residual against a
+    moving average centred one sample away, which is invisible on a smooth
+    series and biases :math:`h` on a rough one. Both the residual arrays and the
+    exponents they produce are checked, at scales that do and do not divide
+    :math:`N`.
+    """
+    y = fbm_path(seed=37, n=1 << 12)
+    reverse = np.ascontiguousarray(y[::-1])
+    for window in (8, 17, 64, 129):
+        forward = mfdma_residual(y, window, 0.0)
+        mirrored = mfdma_residual(reverse, window, 1.0)[::-1]
+        assert forward.size == mirrored.size
+        gap = float(np.max(np.abs(forward - mirrored)))
+        assert gap < 1.0e-12, f"n={window}: backward/forward residuals differ by {gap:.3e}"
+
+
+def test_decimating_the_series_leaves_the_exponent_where_it_was() -> None:
+    r"""fBm is self-similar, so :math:`X(2t)` has the same :math:`H` as :math:`X(t)`.
+
+    Reading a record at every other tick is the commonest thing a user does to a
+    long series, and under the scaling hypothesis it must not move the exponent
+    --- it only shifts the fitted window by a factor of two and the intercept by
+    :math:`H\log 2`. An estimator whose answer drifts under decimation is
+    reading the *sampling rate*, not the process; that would make every exponent
+    quoted in this library a function of how the data happened to be recorded.
+    Measured drift at :math:`n=2^{16}\to2^{15}\to2^{14}` (bound 0.05)::
+
+        mfdfa 0.021  mfdma 0.018  structure_function 0.023
+        leaders 0.007  ghe 0.006  wtmm 0.019
+    """
+    x = fbm_path(seed=41, n=1 << 16)
+    for name in NAMES:
+        fn = ESTIMATORS[name]
+        full = fn(x, q=Q_POSITIVE).h2
+        for step in (2, 4):
+            thinned = fn(np.ascontiguousarray(x[::step]), q=Q_POSITIVE).h2
+            assert abs(thinned - full) < 0.05, (
+                f"{name}: h(2) moved from {full:.4f} to {thinned:.4f} on reading every "
+                f"{step}th sample of the same path"
+            )
+
+
+def test_one_sample_more_or_less_does_not_move_the_exponent() -> None:
+    """A scale grid that jumps at a record length is a discontinuous estimator.
+
+    Every estimator derives its scales from :math:`N` (``log_spaced_scales``
+    rounds a geometric grid; the wavelet families take
+    :math:`\\lfloor\\log_2 N\\rfloor` octaves). If a single extra sample tips a
+    scale in or out of the admissible set, two analyses of the same series that
+    differ only in where the extract was cut disagree for a reason that has
+    nothing to do with the data. Measured spread over
+    :math:`N\\in\\{16383,16384,16385\\}` of one path: at most 0.0023
+    (wavelet leaders, at the octave boundary), so the bound is 0.02.
+    """
+    path = fbm_path(seed=43, n=(1 << 14) + 1)
+    lengths = ((1 << 14) - 1, 1 << 14, (1 << 14) + 1)
+    for name in NAMES:
+        fn = ESTIMATORS[name]
+        values = [fn(np.ascontiguousarray(path[:n]), q=Q_POSITIVE).h2 for n in lengths]
+        spread = max(values) - min(values)
+        assert spread < 0.02, (
+            f"{name}: h(2) = {[round(v, 4) for v in values]} for N = {lengths}; "
+            f"a one-sample change in the record length moved it by {spread:.4f}"
+        )
 
 
 @pytest.mark.slow

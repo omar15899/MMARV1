@@ -17,7 +17,7 @@ import json
 import sys
 from collections.abc import Sequence
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
 
@@ -55,6 +55,22 @@ def _load(args: argparse.Namespace) -> tuple[np.ndarray, str]:
     return np.asarray(values, dtype=float), series.name
 
 
+def _kind(args: argparse.Namespace) -> Literal["level", "increments"]:
+    """Resolve ``--kind``, defaulting to whatever ``--transform`` produced.
+
+    ``--transform log-returns`` differences the log price here, so the series
+    handed to :func:`~mmar.analysis.analyze` *is* a series of increments. A fixed
+    ``--kind level`` default then told the estimator the opposite and every
+    exponent came back shifted by one: on an fBm log price with :math:`H=0.65`,
+    ``--transform log-returns`` reported ``h(2) = 0.036`` and
+    :math:`\\alpha_0=0.047` --- the regularity of the noise --- against 0.655
+    with ``--kind increments``. An explicit ``--kind`` still wins.
+    """
+    if args.kind in ("level", "increments"):
+        return "level" if args.kind == "level" else "increments"
+    return "increments" if args.transform == "log-returns" else "level"
+
+
 def _emit(payload: dict[str, Any], args: argparse.Namespace) -> None:
     text = json.dumps(payload, indent=2, sort_keys=True, default=str)
     if args.json_out:
@@ -75,7 +91,7 @@ def cmd_analyze(args: argparse.Namespace) -> int:
 
     if len(args.estimator) > 1:
         reports = compare_estimators(
-            x, estimators=args.estimator, kind=args.kind, q=q, seed=args.seed
+            x, estimators=args.estimator, kind=_kind(args), q=q, seed=args.seed
         )
         print(spectrum_table(reports), file=sys.stderr)
         print(consensus(reports), file=sys.stderr)
@@ -89,7 +105,7 @@ def cmd_analyze(args: argparse.Namespace) -> int:
         report = analyze(
             x,
             estimator=args.estimator[0],
-            kind=args.kind,
+            kind=_kind(args),
             q=q,
             seed=args.seed,
             surrogate_test=args.surrogate_test,
@@ -119,7 +135,7 @@ def cmd_calibrate(args: argparse.Namespace) -> int:
 
     x, name = _load(args)
     report = analyze(
-        x, estimator=args.estimator[0], kind=args.kind, q=_q_grid(args.q), seed=args.seed
+        x, estimator=args.estimator[0], kind=_kind(args), q=_q_grid(args.q), seed=args.seed
     )
     result = calibrate_from_spectrum(report.exponents, report.spectrum, base=args.base)
     print(result, file=sys.stderr)
@@ -198,9 +214,12 @@ def build_parser() -> argparse.ArgumentParser:
         )
         p.add_argument(
             "--kind",
-            default="level",
+            default=None,
             choices=("level", "increments"),
-            help="whether the analysed series is already integrated (default: level)",
+            help=(
+                "whether the analysed series is already integrated "
+                "(default: follows --transform, i.e. increments for log-returns)"
+            ),
         )
 
     def add_common(p: argparse.ArgumentParser) -> None:

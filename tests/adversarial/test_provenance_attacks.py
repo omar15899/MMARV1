@@ -27,6 +27,7 @@ from mmar.core.provenance import (
     SeedInfo,
     array_digest,
     canonical_json,
+    digest_document,
     digest_mapping,
     new_provenance,
 )
@@ -80,10 +81,6 @@ def _put(store: ArtifactStore, **over: Any) -> str:
             "the array sentinel is an ordinary dict shape",
         ),
     ],
-)
-@pytest.mark.xfail(
-    strict=True,
-    reason="_canonicalise is not injective: floats and its own sentinels are untagged",
 )
 def test_canonicalisation_is_injective(left: Any, right: Any, why: str) -> None:
     """Two params that a user can distinguish must not canonicalise the same.
@@ -373,22 +370,30 @@ def test_the_stored_summary_cannot_be_rewritten(tmp_path: Path) -> None:
     assert not store.verify(root)
 
 
-def test_canonical_serialisation_is_a_fixed_point(tmp_path: Path) -> None:
-    """Serialise, reload, re-serialise: the bytes must not move.
+def test_re_hashing_a_stored_document_is_stable(tmp_path: Path) -> None:
+    """Serialise, reload, re-hash: the address must not move.
 
-    Every root-recomputation check downstream (``load_manifest``, the store's
-    self-addressing check) relies on canonicalising an already-canonical
-    document being a no-op. If it ever stopped being one, verification would
-    start rejecting honest manifests.
+    Canonicalisation is injective but deliberately NOT idempotent -- a string
+    that spells a sentinel is escaped on every pass, which is exactly what stops
+    it colliding with the sentinel. So the invariant every verification path
+    relies on is not "canonicalising twice is a no-op", it is "an already
+    canonical document re-hashes to the same address", which is what
+    ``digest_document`` is for. Getting this wrong makes honest manifests
+    containing an array, a NaN or a ``__``-prefixed string fail verification on
+    the first round trip.
     """
     store = ArtifactStore(tmp_path / "cas")
     prov = _provenance(params={"a": 1.5, "b": float("nan"), "c": (1, 2), "d": np.arange(3.0)})
     root = store.put(prov, arrays={"zeta": np.arange(4.0)}, summary={"h2": 0.5})
-    once = canonical_json(store.get_manifest(root))
-    assert canonical_json(json.loads(once)) == once
-    assert digest_mapping(json.loads(once)) == digest_mapping(
-        json.loads(canonical_json(json.loads(once)))
-    )
+
+    document = store.get_manifest(root)
+    reloaded = json.loads(json.dumps(document))
+    assert digest_document(document) == digest_document(reloaded)
+    assert store.verify(root)
+
+    # And the non-idempotence is a deliberate property, not an accident.
+    once = canonical_json({"v": "__nan__"})
+    assert canonical_json(json.loads(once)) != once
 
 
 def test_run_manifest_rejects_a_forged_reported_number(tmp_path: Path) -> None:

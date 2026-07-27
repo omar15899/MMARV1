@@ -15,6 +15,7 @@ convention was actually being violated.
 
 from __future__ import annotations
 
+import json
 import math
 import warnings
 from typing import Any
@@ -32,15 +33,26 @@ from mmar.core.legendre import (
 from mmar.core.types import FloatArray, PointwiseHolder, ScalingExponents
 from mmar.estimators.box_counting import generalised_dimensions
 from mmar.estimators.chhabra_jensen import chhabra_jensen
+from mmar.estimators.ghe import generalised_hurst
+from mmar.estimators.mfdfa import mfdfa
+from mmar.estimators.mfdma import mfdma
 from mmar.estimators.pointwise import oscillation_holder
 from mmar.estimators.structure_function import mfc_exponents
+from mmar.inference.cumulants import cumulants_from_exponents
 from mmar.models.cascade import deterministic_cascade
 from mmar.models.fbm import fbm, fgn, levy_stable_increments
 from mmar.models.theory import (
+    cascade_exponents,
+    cascade_falpha,
     cascade_tau,
+    fbm_exponents,
     lognormal_conservation_sigma2,
     lognormal_falpha,
     lognormal_tau,
+    mmar_falpha_lognormal,
+    mmar_hurst_from_tau,
+    mmar_tau,
+    mmar_tau_lognormal,
 )
 
 _KMAX = 13
@@ -465,3 +477,411 @@ def test_surrogate_test_measures_the_statistic_the_report_quotes() -> None:
     assert float(surrogates.shuffle.statistic) == pytest.approx(reported, rel=1e-12)
     assert float(surrogates.iaaft.statistic) == pytest.approx(reported, rel=1e-12)
     assert report.exponents.h2 < 1.0
+
+
+# --------------------------------------------------------------------------- #
+# The log base, for every estimator, against its own stored surface
+# --------------------------------------------------------------------------- #
+
+_ZETA_FROM_SLOPE: dict[str, str] = {
+    # How each family's fitted log--log slope becomes zeta. Wavelet leaders and
+    # the structure functions fit S ~ delta^zeta directly; MF-DFA and MF-DMA fit
+    # the fluctuation F ~ delta^{h(q)} and multiply by q; WTMM sums over maxima
+    # lines and so fits tau, to which d is added.
+    "wavelet_leaders": "slope",
+    "structure_function": "slope",
+    "ghe": "slope",
+    "mfdfa": "q*slope",
+    "mfdma": "q*slope",
+    "wtmm": "slope+d",
+}
+
+_SURFACE_KWARGS: dict[str, dict[str, Any]] = {
+    # Off, so that zeta is the single reported fit rather than a mean over
+    # tau_max cutoffs; the averaging is a documented GHE feature, not a convention.
+    "ghe": {"average_tau_max": False},
+}
+
+
+def _predict_zeta(rule: str, slope: float, q: float, d: float) -> float:
+    if rule == "slope":
+        return slope
+    if rule == "q*slope":
+        return q * slope
+    return slope + d
+
+
+def test_every_estimator_reports_a_base_independent_slope_of_its_own_stored_surface() -> None:
+    r"""Attack: a log base, or a factor of :math:`q`, or a :math:`d` that lives in
+    one estimator only.
+
+    :class:`~mmar.core.types.StructureFunctions` is documented as the audit
+    surface --- "the exponents can always be refitted from it". So refit them:
+    for every estimator, take the *stored* surface over the *stored* scaling
+    mask and recompute each slope by hand in natural, binary and decimal
+    logarithms. All three must agree with each other and with the estimator's own
+    :class:`~mmar.core.types.LogLogFit` to floating point, and the documented
+    map from that slope to :math:`\zeta` must hold exactly. Six estimators, three
+    different maps: a family that dropped its :math:`q`, or added :math:`d` twice,
+    cannot hide behind a plausible curve.
+
+    The teeth are at the end: at :math:`q=3` the two maps this estimator does
+    *not* use land more than 0.1 away, so the equality above is discriminating
+    and not an artefact of the three maps agreeing on this data.
+    """
+    x = fbm(2048, H=0.65, seed=3)
+    q = np.array([-3.0, -1.0, 0.0, 0.5, 2.0, 3.0])
+
+    for name, rule in _ZETA_FROM_SLOPE.items():
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            e = analyze(
+                x, estimator=name, q=q, cumulants=False, **_SURFACE_KWARGS.get(name, {})
+            ).exponents
+        structure = e.structure
+        assert structure is not None and structure.counts is not None, name
+        srange = e.scaling_range
+        mask = (
+            np.array(srange.mask, dtype=bool)
+            if srange is not None and srange.mask
+            else np.ones(structure.scales.size, dtype=bool)
+        )
+        delta = structure.scales[mask]
+        w = np.asarray(structure.counts, dtype=np.float64)[mask]
+
+        for i in range(q.size):
+            y = structure.values[i][mask]
+            with np.errstate(divide="ignore", invalid="ignore"):
+                slopes = [
+                    _wls_slope(np.log(delta) / math.log(base), np.log(y) / math.log(base), w)
+                    for base in (math.e, 2.0, 10.0)
+                ]
+            assert max(slopes) - min(slopes) < 1e-12, f"{name} q={q[i]}: base-dependent {slopes}"
+            assert abs(slopes[0] - float(e.fits[i].slope)) < 1e-9, (
+                f"{name} q={q[i]}: reported slope {e.fits[i].slope!r} is not the slope of the "
+                f"stored surface ({slopes[0]!r})"
+            )
+            predicted = _predict_zeta(rule, slopes[0], float(q[i]), e.d_support)
+            assert abs(predicted - float(e.zeta[i])) < 1e-9, (
+                f"{name} q={q[i]}: zeta {e.zeta[i]!r} is not {rule} = {predicted!r}"
+            )
+
+        i3 = int(np.argmin(np.abs(q - 3.0)))
+        slope3 = float(e.fits[i3].slope)
+        for other in {"slope", "q*slope", "slope+d"} - {rule}:
+            assert abs(_predict_zeta(other, slope3, 3.0, e.d_support) - float(e.zeta[i3])) > 0.1, (
+                f"{name}: the {other!r} map is indistinguishable here, so the test has no teeth"
+            )
+
+
+# --------------------------------------------------------------------------- #
+# The same estimator, spelt two ways
+# --------------------------------------------------------------------------- #
+
+
+def test_naming_an_estimator_and_passing_it_are_the_same_computation() -> None:
+    r"""Attack: the level-canonicalisation pin applied to one spelling of an estimator only.
+
+    :func:`~mmar.analysis.analyze` documents ``estimator`` as "a name from
+    :data:`ESTIMATORS`, or any callable". Both spellings receive the same level
+    series, but ``_LEVEL_KWARGS`` --- which stops MF-DFA integrating an
+    already-integrated series --- was keyed on ``isinstance(estimator, str)``.
+    So ``analyze(x, estimator=mfdfa)`` reported :math:`h(2)=1.667` where
+    ``analyze(x, estimator="mfdfa")`` reported :math:`0.658` on the same
+    ``fbm(4096, H=0.65, seed=3)``: the exact off-by-one the pin exists to remove,
+    reintroduced by how the estimator was named, with two different provenance
+    roots to certify both.
+
+    Equality is asserted bit-for-bit --- these are the same computation, so
+    anything looser would pass on a shift of :math:`10^{-3}` that no estimator
+    should ever produce.
+    """
+    from mmar.analysis import get_estimator
+
+    x = fbm(4096, H=0.65, seed=3)
+    q = np.linspace(-3.0, 3.0, 13)
+    for name, fn in (("mfdfa", mfdfa), ("mfdma", mfdma), ("ghe", generalised_hurst)):
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            by_name = analyze(x, estimator=name, q=q, cumulants=False)
+            by_callable = analyze(x, estimator=fn, q=q, cumulants=False)
+            by_registry = analyze(x, estimator=get_estimator(name), q=q, cumulants=False)
+        for label, other in (("callable", by_callable), ("registry", by_registry)):
+            assert np.array_equal(by_name.exponents.zeta, other.exponents.zeta), (
+                f"{name} as {label}: h(2) = {other.exponents.h2!r} against "
+                f"{by_name.exponents.h2!r} by name"
+            )
+            assert by_name.provenance is not None and other.provenance is not None
+            assert by_name.provenance.root == other.provenance.root, f"{name} as {label}"
+
+    g = fgn(4096, H=0.65, seed=3)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        named = analyze(g, estimator="mfdfa", kind="increments", q=q, cumulants=False)
+        passed = analyze(g, estimator=mfdfa, kind="increments", q=q, cumulants=False)
+    assert np.array_equal(named.exponents.zeta, passed.exponents.zeta)
+
+
+# --------------------------------------------------------------------------- #
+# The command line
+# --------------------------------------------------------------------------- #
+
+
+def test_the_cli_kind_cannot_contradict_the_transform_it_just_applied(tmp_path: Any) -> None:
+    r"""Attack: two independent flags that between them decide a :math:`\pm1`.
+
+    ``mmar analyze --transform log-returns`` differences the log price *inside*
+    the CLI, so what reaches :func:`~mmar.analysis.analyze` is a series of
+    increments --- while ``--kind`` defaulted to ``level`` regardless. On an fBm
+    log price with :math:`H=0.65` the command reported ``h2 = 0.036`` and
+    ``alpha_0 = 0.047``, the regularity of the noise rather than of the process,
+    against 0.655 for the same file read as a log price. Nothing in the JSON
+    payload said which of the two questions had been answered.
+
+    The last assertion keeps the trap visible: an explicit ``--kind level`` on
+    returns still measures the noise, because that is what it asks for.
+    """
+    pd = pytest.importorskip("pandas")
+    from mmar.cli import main
+
+    price = np.exp(0.01 * fbm(4096, H=0.65, seed=9) + 4.0)
+    csv = tmp_path / "px.csv"
+    pd.DataFrame(
+        {"Date": pd.date_range("2000-01-03", periods=price.size, freq="B"), "Close": price}
+    ).to_csv(csv, index=False)
+
+    def run(*extra: str) -> dict[str, Any]:
+        out = tmp_path / "out.json"
+        argv = [
+            "analyze",
+            "--input",
+            str(csv),
+            "--estimator",
+            "mfdfa",
+            "--q=-3:3:13",
+            "--json-out",
+            str(out),
+            *extra,
+        ]
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            assert main(argv) == 0
+        return dict(json.loads(out.read_text()))
+
+    level = run()
+    returns = run("--transform", "log-returns")
+    explicit = run("--transform", "log-returns", "--kind", "increments")
+    mislabelled = run("--transform", "log-returns", "--kind", "level")
+
+    assert abs(float(returns["h2"]) - float(level["h2"])) < 0.05, (
+        f"log-returns reported h2={returns['h2']!r} against {level['h2']!r} for the same series"
+    )
+    assert returns["h2"] == explicit["h2"]
+    assert float(mislabelled["h2"]) < 0.2
+
+
+# --------------------------------------------------------------------------- #
+# d_support across the two native views
+# --------------------------------------------------------------------------- #
+
+
+def test_d_support_only_ever_relabels_what_the_producer_did_not_measure() -> None:
+    r"""Attack: :math:`d` applied to the measured quantity instead of the derived one.
+
+    Every producer in the library is native to one view and converts to the
+    other. A measure-native one (Chhabra--Jensen, box counting, the cascade
+    oracle) measures :math:`\tau` and :math:`f`, so declaring :math:`d=2` must
+    move :math:`\zeta=\tau+d` by exactly one and *nothing else*. A signal-native
+    one (the fBm oracle, like every series estimator) measures :math:`\zeta`, so
+    the same declaration must move :math:`\tau` and :math:`f` by one and leave
+    :math:`\alpha` alone. Either way :math:`\zeta-\tau\equiv d` exactly, which is
+    the only place the offset is allowed to live.
+
+    Chhabra--Jensen is the sharp case: its :math:`f(\alpha)` is a *fitted slope*,
+    not a Legendre transform, so a :math:`d` leaking into it would not show up in
+    any consistency check between :math:`\tau` and :math:`f`.
+    """
+    mu = _binomial_measure()
+
+    cj1, cj2 = chhabra_jensen(mu, q=_Q), chhabra_jensen(mu, q=_Q, d_support=2.0)
+    assert np.max(np.abs(cj2.alpha - cj1.alpha)) < 1e-12
+    assert np.max(np.abs(cj2.f_alpha - cj1.f_alpha)) < 1e-12
+    assert np.max(np.abs(cj2.exponents.tau - cj1.exponents.tau)) < 1e-12
+    assert np.allclose(cj2.exponents.zeta - cj1.exponents.zeta, 1.0, atol=1e-12)
+
+    measure_native = [
+        (generalised_dimensions(mu, q=_Q), generalised_dimensions(mu, q=_Q, d_support=2.0)),
+        (cascade_exponents(_Q, m=_M), cascade_exponents(_Q, m=_M, d_support=2.0)),
+    ]
+    for one, two in measure_native:
+        assert np.max(np.abs(two.tau - one.tau)) < 1e-12
+        assert np.allclose(two.zeta - one.zeta, 1.0, atol=1e-12)
+
+    e1, e2 = fbm_exponents(_Q, H=0.7), fbm_exponents(_Q, H=0.7, d_support=2.0)
+    assert np.max(np.abs(e2.zeta - e1.zeta)) < 1e-12
+    assert np.allclose(e2.tau - e1.tau, -1.0, atol=1e-12)
+    s1, s2 = spectrum_from_exponents(e1), spectrum_from_exponents(e2)
+    assert np.max(np.abs(s2.alpha - s1.alpha)) < 1e-12
+    assert np.allclose(s2.f_alpha - s1.f_alpha, 1.0, atol=1e-12)
+
+    for producer in (
+        cj1.exponents,
+        cj2.exponents,
+        e1,
+        e2,
+        *[e for pair in measure_native for e in pair],
+    ):
+        assert np.allclose(producer.zeta - producer.tau, producer.d_support, atol=1e-12)
+
+
+# --------------------------------------------------------------------------- #
+# Log cumulants
+# --------------------------------------------------------------------------- #
+
+
+def test_log_cumulants_and_the_parabolic_spectrum_share_the_measure_convention() -> None:
+    r"""Attack: a log base inside :math:`c_2`, and a :math:`d` inside the parabola.
+
+    For the conservative lognormal cascade :math:`\zeta(q)=q\lambda-\frac12
+    q^2\sigma^2\ln b`, so :math:`c_1=\lambda` and :math:`c_2=-\sigma^2\ln b`
+    exactly --- an estimator that took its logarithms in base :math:`b` instead
+    would return :math:`-\sigma^2\log_b b\cdot\ln b`, here :math:`-0.144` against
+    :math:`-0.100`, a plausible-looking 44% error. The second-order spectrum
+    :math:`f=d+(\alpha-c_1)^2/(2c_2)` must then coincide with the closed-form
+    parabola, which pins the sign of :math:`c_2` and the single :math:`d`.
+
+    Last: the docstring of :func:`cumulants_from_exponents` claims a caller who
+    passes :math:`\tau` instead of :math:`\zeta` gets a conspicuously bad fit
+    rather than a quietly shifted answer. Measured here: :math:`c_1` is
+    untouched (1.0500) but :math:`c_2` comes back :math:`-3.14` against
+    :math:`-0.10`, a factor of 31 --- the claim holds, and in the worst possible
+    place, since :math:`c_2` *is* the multifractality statistic.
+    """
+    lam, b = 1.05, 2.0
+    sigma2 = lognormal_conservation_sigma2(lam, b)
+    q = np.linspace(-4.0, 4.0, 81)
+    zeta = lognormal_tau(q, lam, sigma2, b) + 1.0
+
+    c = cumulants_from_exponents(
+        ScalingExponents(q=q, zeta=zeta, d_support=1.0, estimator="oracle"),
+        order=2,
+        q_range=(-1.0, 1.0),
+    )
+    assert abs(c.c1 - lam) < 1e-9
+    assert abs(c.c2 + sigma2 * math.log(b)) < 1e-9
+    assert abs(c.c2 + sigma2 * math.log2(b)) > 0.02, "the test cannot see the log base"
+
+    alpha = np.linspace(lam - 0.3, lam + 0.3, 41)
+    assert (
+        np.max(np.abs(c.parabolic_spectrum(alpha) - lognormal_falpha(alpha, lam, sigma2, b))) < 1e-9
+    )
+
+    c_d2 = cumulants_from_exponents(
+        ScalingExponents(q=q, zeta=zeta, d_support=2.0, estimator="oracle"),
+        order=2,
+        q_range=(-1.0, 1.0),
+    )
+    assert np.allclose(
+        c_d2.parabolic_spectrum(alpha) - c.parabolic_spectrum(alpha), 1.0, atol=1e-12
+    )
+
+    wrong = cumulants_from_exponents(
+        ScalingExponents(
+            q=q, zeta=lognormal_tau(q, lam, sigma2, b), d_support=1.0, estimator="tau-as-zeta"
+        ),
+        order=2,
+        q_range=(-1.0, 1.0),
+    )
+    assert wrong.c2 < -1.0
+
+
+# --------------------------------------------------------------------------- #
+# A base that is not two
+# --------------------------------------------------------------------------- #
+
+
+def test_a_triadic_cascade_would_catch_a_hard_coded_base_two_logarithm() -> None:
+    r"""Attack: :math:`\log_2` written where :math:`\log_b` was meant.
+
+    Every anchor in this file so far has been measured on a *binomial* cascade,
+    where a hard-coded base 2 is invisible because it is the right base. The
+    triadic cascade separates them: :math:`\tau=-\log_3\sum_i m_i^q` differs from
+    :math:`-\log_2\sum_i m_i^q` by the factor :math:`\ln3/\ln2=1.585`, more than
+    one unit of :math:`\tau` over this grid. Both measure-domain estimators and
+    the structure functions on the induced staircase must land on the base-3
+    closed form to floating point, and the anchors :math:`\tau(0)=-1`,
+    :math:`\tau(1)=0` must survive on a non-dyadic scale ladder.
+    """
+    m = (0.5, 0.3, 0.2)
+    kmax = 8
+    mu = deterministic_cascade(m=m, kmax=kmax)
+    q = np.linspace(-2.0, 2.0, 17)
+    scales = np.array([3**j for j in range(1, kmax - 1)], dtype=np.int64)
+    exact = cascade_tau(q, m)
+    base_two = exact * math.log(3.0) / math.log(2.0)
+    assert np.max(np.abs(exact - base_two)) > 1.0, "the two bases are not separated on this grid"
+
+    cj = chhabra_jensen(mu, q=q, scales=scales).exponents
+    bc = generalised_dimensions(mu, q=q, b=3, scales=scales)
+    sf = mfc_exponents(_trading_time(mu), q=q, scales=scales)
+
+    i0, i1 = int(np.argmin(np.abs(q))), int(np.argmin(np.abs(q - 1.0)))
+    for name, e in (("chhabra_jensen", cj), ("box_counting", bc)):
+        assert np.max(np.abs(e.tau - exact)) < 1e-9, name
+        assert abs(float(e.tau[i0]) + 1.0) < 1e-9, name
+        assert abs(float(e.tau[i1])) < 1e-9, name
+    assert np.max(np.abs(sf.zeta - (exact + 1.0))) < 1e-9
+
+    assert (
+        np.max(np.abs(cascade_falpha(cj.q * 0 + 1.0, m) - cascade_falpha(np.array([1.0]), m)))
+        < 1e-12
+    )
+
+
+# --------------------------------------------------------------------------- #
+# MMAR: two conventions composed
+# --------------------------------------------------------------------------- #
+
+
+def test_the_mmar_time_deformation_composes_both_conventions_without_an_offset() -> None:
+    r"""Attack: the :math:`+1` in :math:`\zeta_X=\tau_\theta(qH)+1`, dropped or doubled.
+
+    Independent derivation. :math:`X=B_H(\theta)` with :math:`\theta` independent
+    of :math:`B_H` gives :math:`\mathbb E|\Delta_\delta X|^q = \mathbb
+    E|B_H(1)|^q\,\mathbb E[(\Delta_\delta\theta)^{qH}]`. The trading-time
+    increment over a box *is* that box's mass, so the expectation is the
+    partition sum divided by the :math:`\delta^{-1}` boxes:
+    :math:`\delta^{\tau_\theta(qH)+1}`. Hence :math:`\zeta_X(q)=\tau_\theta(qH)+1`
+    and :math:`\tau_X(q)=\tau_\theta(qH)` --- with no offset of its own, which is
+    what the composition of a measure-view function with a signal-view one is
+    least likely to get right.
+
+    The consequences are the anchors: :math:`\tau_X(0)=-1`,
+    :math:`\tau_X(1/H)=0` (so the :math:`\tau` root returns :math:`H` and not
+    :math:`1`), :math:`f_X(\alpha)=f_\theta(\alpha/H)` with the apex still at
+    :math:`d`. The teeth: reading the trading time's own :math:`\tau` as the
+    price path's puts the root at 1.0 instead of 0.55.
+    """
+    h = 0.55
+    q = np.linspace(-3.0, 3.0, 25)
+    tau_x = mmar_tau(q, h, lambda p: cascade_tau(p, _M))
+    assert np.max(np.abs(tau_x - cascade_tau(q * h, _M))) == 0.0
+
+    i0 = int(np.argmin(np.abs(q)))
+    assert abs(float(tau_x[i0]) + 1.0) < 1e-12
+    assert abs(float(mmar_tau(np.array([1.0 / h]), h, lambda p: cascade_tau(p, _M))[0])) < 1e-12
+
+    exponents = ScalingExponents(q=q, zeta=tau_x + 1.0, estimator="theory.mmar")
+    assert abs(exponents.hurst_tau_root - h) < 1e-5
+    assert abs(mmar_hurst_from_tau(q, tau_x) - h) < 1e-5
+    theta_only = ScalingExponents(q=q, zeta=cascade_tau(q, _M) + 1.0, estimator="theory.cascade")
+    assert abs(theta_only.hurst_tau_root - h) > 0.3, "the H composition is invisible here"
+
+    lam, b = 1.05, 2.0
+    sigma2 = lognormal_conservation_sigma2(lam, b)
+    qf = np.linspace(-20.0, 20.0, 20001)
+    tau_fine = mmar_tau_lognormal(qf, h, lam, sigma2, b)
+    alpha = np.linspace(h * (lam - 0.5), h * (lam + 0.5), 41)
+    f_numeric = np.min(np.outer(alpha, qf) - tau_fine[None, :], axis=1)
+    assert np.max(np.abs(f_numeric - mmar_falpha_lognormal(alpha, h, lam, sigma2, b))) < 1e-6
+    assert abs(float(np.max(f_numeric)) - 1.0) < 1e-6

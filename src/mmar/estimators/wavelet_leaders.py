@@ -188,6 +188,14 @@ ESTIMATOR_COEFFS = "wavelet_coefficients"
 ESTIMATOR_CUMULANTS = "wavelet_leaders.cumulants"
 _VERSION = "1"
 
+_TILT_BUDGET = 1 << 17
+r"""Cells above which :func:`_log_structure` reduces one :math:`q` at a time.
+
+:math:`10^5` float64 cells is under a megabyte, so below the budget the
+broadcast form costs nothing; above it the temporary grows like
+:math:`n_q N/8` and dominates the whole estimator's footprint.
+"""
+
 
 # --------------------------------------------------------------------------- #
 # Wavelet transform and the leader pyramid
@@ -539,11 +547,24 @@ def _log_structure(pyramid: LeaderPyramid, q: FloatArray) -> FloatArray:
     for :math:`q` beyond :math:`\pm 8` it overflows float64 outright. The
     log-domain form is exact to machine precision throughout, and it is the
     quantity the regression consumes anyway.
+
+    Above :data:`_TILT_BUDGET` cells the reduction runs one :math:`q` at a time.
+    The broadcast :math:`(n_q\times n_j)` tilt matrix is bit-for-bit identical
+    either way, but materialising it costs: :math:`n_{j_{\min}}\approx N/8`, so
+    with the default 41-point grid the peak allocation was 33 times the series
+    (17.2 MB at :math:`N=2^{16}`, and 1.1 GB at :math:`N=2^{22}`). The coarse
+    octaves stay vectorised, where the matrix is at most a megabyte and a Python
+    loop over :math:`q` would be pure call overhead.
     """
     out = np.empty((q.size, pyramid.octaves.size), dtype=np.float64)
     for i, v in enumerate(pyramid.values):
         ln = np.log(v)
-        out[:, i] = np.asarray(logsumexp(q[:, None] * ln[None, :], axis=1)) - math.log(v.size)
+        log_n = math.log(v.size)
+        if q.size * ln.size > _TILT_BUDGET:
+            for k, qk in enumerate(q):
+                out[k, i] = float(logsumexp(float(qk) * ln)) - log_n
+        else:
+            out[:, i] = np.asarray(logsumexp(q[:, None] * ln[None, :], axis=1)) - log_n
     return out
 
 
@@ -892,6 +913,7 @@ def exponents_from_structure(
     select_range: bool = False,
     scale_range: tuple[float, float] | None = None,
     d_support: float = 1.0,
+    saturation_tolerance: float = 0.5,
     estimator: str = "wavelet_leaders.refit",
 ) -> ScalingExponents:
     r"""Refit :math:`\zeta` from a stored scaling surface, over a new scale window.
@@ -900,6 +922,12 @@ def exponents_from_structure(
     the scaling range is a modelling choice, and changing it must not require
     recomputing a wavelet transform. Requires ``structure.counts`` (present on
     everything this module produces) for the count weighting.
+
+    ``saturation_tolerance`` has the same meaning as in :func:`wavelet_leaders`:
+    the refit runs the same :math:`N_\psi` ceiling check, because an exponent
+    fitted over a narrower window saturates just as readily as one fitted over
+    the full octave range, and the two paths must not disagree about whether the
+    answer is the wavelet's or the data's.
     """
     if structure.counts is None:
         raise ValueError("the structure functions carry no window counts; cannot weight the fit")
@@ -919,7 +947,7 @@ def exponents_from_structure(
             "the stored scaling surface contains non-positive or overflowed moments; "
             "restrict q or the scale range before refitting"
         )
-    fits, scaling_range, _ = _fit_rows(
+    fits, scaling_range, notes = _fit_rows(
         scales,
         log_s,
         counts,
@@ -939,10 +967,31 @@ def exponents_from_structure(
                 "scale_range": list(scale_range) if scale_range is not None else None,
                 "d_support": float(d_support),
             },
+            notes=tuple(notes),
         )
         if structure.provenance is not None
         else None
     )
+    if prov is not None and structure.provenance is not None:
+        # `derive` starts a fresh diagnostics map. Without this the cheap refit
+        # path returns a record with no wavelet, no octave leader counts and no
+        # scaling range -- so a result rebuilt from a stored surface cannot be
+        # told apart from one fitted over a different window with a different
+        # filter. Diagnostics are non-identifying, so `root` is untouched.
+        diagnostics: dict[str, Any] = {
+            **dict(structure.provenance.diagnostics),
+            "scaling_range": scaling_range.to_canonical(),
+            "median_r_squared": scaling_range.r_squared,
+            "zeta_at_zero": float(zeta[int(np.argmin(np.abs(structure.q)))]),
+        }
+        n_psi = structure.provenance.diagnostics.get("n_vanishing_moments")
+        if isinstance(n_psi, int):
+            diagnostics.update(
+                _saturation_diagnostics(structure.q, zeta, n_psi, saturation_tolerance)
+            )
+        if notes:
+            diagnostics["notes"] = notes
+        prov = prov.with_diagnostics(**diagnostics)
     return ScalingExponents(
         q=structure.q,
         zeta=zeta,

@@ -212,6 +212,14 @@ __all__ = [
 
 _VERSION = "1"
 
+_TILT_BUDGET = 1 << 17
+r"""Cells above which the partition function reduces one :math:`q` at a time.
+
+:math:`10^5` float64 cells is under a megabyte, so below the budget the
+broadcast :math:`(n_q\times n_\text{lines})` form costs nothing; above it the
+temporary dominates everything but the wavelet transform itself.
+"""
+
 _DEFAULT_S_MIN = 4
 """Below ~4 samples the sampled derivative-of-Gaussian is not resolved."""
 
@@ -755,7 +763,16 @@ def wtmm_structure(
         sel = skeleton.scale_index == j
         with np.errstate(divide="ignore"):
             log_sup = np.log(skeleton.running_sup[sel])
-        log_z[:, jj] = logsumexp(qa[:, None] * log_sup[None, :], axis=1)
+        # Above _TILT_BUDGET cells, one q at a time. The broadcast
+        # (n_q x n_lines) tilt matrix is bit-for-bit identical but materialises
+        # it, and logsumexp keeps several copies alive; the finest scales carry
+        # O(N) lines. Below the budget the matrix is under a megabyte and the
+        # loop would be pure call overhead.
+        if qa.size * log_sup.size > _TILT_BUDGET:
+            for i, qi in enumerate(qa):
+                log_z[i, jj] = float(logsumexp(float(qi) * log_sup))
+        else:
+            log_z[:, jj] = logsumexp(qa[:, None] * log_sup[None, :], axis=1)
 
     with np.errstate(over="ignore"):
         values = np.exp(log_z)

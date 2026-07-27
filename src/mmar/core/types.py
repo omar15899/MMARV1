@@ -247,9 +247,29 @@ class StructureFunctions:
                 f"structure-function grid mismatch: values{self.values.shape} "
                 f"vs (n_q={self.q.size}, n_scales={self.scales.size})"
             )
+        _freeze(self, "q", "scales", "values", "counts")
 
     def row(self, q: float) -> FloatArray:
+        r""":math:`S(q,\cdot)` at a moment that is *on* the grid.
+
+        The nearest row is not an answer to the question asked. On
+        ``q = arange(-5, 5.01, 0.3)`` --- a grid a caller writes without noticing
+        it misses 2 --- ``row(2.0)`` returned the :math:`q=1.9` row, and the
+        ``h(2)`` fitted from it came back 0.688 against the true 0.722, silently.
+        Off the end of the grid it is worse: ``row(1000.0)`` returned the
+        :math:`q=5` row. This mirrors :meth:`ScalingExponents.at`, which reports
+        NaN outside its fitted range for the same reason --- a moment that was
+        never computed is not an interpolation problem.
+        """
         idx = int(np.argmin(np.abs(self.q - q)))
+        nearest = float(self.q[idx])
+        if not math.isclose(nearest, float(q), rel_tol=1e-9, abs_tol=1e-12):
+            raise ValueError(
+                f"q={q!r} is not on this surface's moment grid; the nearest is {nearest!r}. "
+                "Returning it would report a different moment under the requested label. "
+                "Pass a value from `surface.q`, or recompute the surface on a grid "
+                "containing the moment you want."
+            )
         return np.asarray(self.values[idx], dtype=np.float64)
 
 
@@ -277,6 +297,7 @@ class ScalingExponents:
             raise ValueError(f"q{self.q.shape} and zeta{self.zeta.shape} must match")
         if self.q.size < 3:
             raise ValueError("at least three q values are required to build a spectrum")
+        _freeze(self, "q", "zeta", "zeta_stderr")
         # at(), h2 and hurst_tau_root all read q as an increasing abscissa.
         # numpy.interp on a descending grid returns a number rather than raising,
         # so a reversed surface is answered with a sign-flipped h(2) and no
@@ -432,6 +453,34 @@ class SpectrumDescriptors:
         }
 
 
+def _freeze(obj: Any, *names: str) -> None:
+    """Make the arrays a result exposes read-only *through that result*.
+
+    ``frozen=True`` on a dataclass protects the *bindings*, not the buffers. Every
+    reported quantity --- ``h2``, ``hurst_tau_root``, the Legendre spectrum and
+    its width --- is derived from these arrays on demand, while
+    ``provenance.root`` digests the inputs and settings only. So
+    ``result.zeta[:] = 2 * result.zeta`` moved ``h2`` from 0.70 to 1.40 with the
+    content address unchanged: the audit record no longer described the object it
+    was attached to.
+
+    Each field is rebound to a read-only *view*, which costs nothing and closes
+    the hazard from the result's side. Clearing ``writeable`` on the array itself
+    would instead reach back through every reference the caller still holds and
+    confiscate their own buffer: a scratch array reused across a sweep then dies
+    on the next iteration with ``assignment destination is read-only``, raised
+    nowhere near the constructor that froze it. An array the caller still holds a
+    writeable reference to therefore remains theirs to corrupt --- pass a copy if
+    that matters.
+    """
+    for name in names:
+        arr = getattr(obj, name)
+        if isinstance(arr, np.ndarray) and arr.flags.writeable:
+            view = arr.view()
+            view.flags.writeable = False
+            object.__setattr__(obj, name, view)
+
+
 def _crossing(a: FloatArray, f: FloatArray, level: float) -> tuple[float, bool]:
     """First point where ``f`` crosses ``level``, walking outward from the apex.
 
@@ -474,6 +523,7 @@ class HolderSpectrum:
     def __post_init__(self) -> None:
         if self.alpha.shape != self.f_alpha.shape:
             raise ValueError(f"alpha{self.alpha.shape} and f{self.f_alpha.shape} must match")
+        _freeze(self, "alpha", "f_alpha", "q", "alpha_stderr", "f_stderr")
 
     @property
     def alpha_0(self) -> float:
@@ -615,6 +665,7 @@ class PointwiseHolder:
     def __post_init__(self) -> None:
         if self.t.shape != self.h.shape:
             raise ValueError(f"t{self.t.shape} and h{self.h.shape} must match")
+        _freeze(self, "t", "h", "stderr", "r_squared")
 
     def singular_times(self, threshold: float) -> NDArray[np.int64]:
         """Indices whose local exponent falls below ``threshold`` (rough points)."""

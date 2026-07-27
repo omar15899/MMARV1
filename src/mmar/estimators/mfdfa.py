@@ -274,8 +274,27 @@ def _resolve_scales(
     n: int, order: int, scales: Sequence[int] | NDArray[Any] | None
 ) -> NDArray[np.int64]:
     """Geometric default, then the two hard admissibility constraints."""
-    raw = _default_scales(n, order) if scales is None else np.asarray(scales, dtype=np.int64)
-    kept = check_scales(raw, n, min_windows=4, name="scales")
+    if scales is None:
+        # The default grid starts at s_min = 10(m+1), so `order` alone can push every
+        # default scale past n/4. check_scales then reports "no scale in scales ...;
+        # the series is too short", which names an argument the caller never passed
+        # and prescribes a longer series when a lower order would do: at n=256 the
+        # same series fits at orders 1-5 and only order >= 6 fails.
+        raw = _default_scales(n, order)
+        try:
+            kept = check_scales(raw, n, min_windows=4, name="scales")
+        except DataQualityError as exc:
+            raise DataQualityError(
+                f"the default MFDFA scale grid for order={order} starts at "
+                f"s_min = 10(order+1) = {10 * (order + 1)}, and no scale that large leaves "
+                f"4 windows in n={n} (the largest admissible scale is {n // 4}). No `scales` "
+                f"were supplied, so this is a constraint on `order`, not on the data: lower "
+                f"the order (any order <= {max(n // 40 - 1, 0)} fits this series), pass "
+                f"`scales=` explicitly, or lengthen the series."
+            ) from exc
+    else:
+        raw = np.asarray(scales, dtype=np.int64)
+        kept = check_scales(raw, n, min_windows=4, name="scales")
     # s = m+1 makes the polynomial interpolate the window and F^2 vanish identically.
     admissible = kept[kept >= order + 2]
     if admissible.size < 3:
@@ -334,6 +353,14 @@ def mfdfa_structure(
     """
     xa = validate_series(x, name="x", min_length=_MIN_LENGTH)
     qa = validate_q_grid(q)
+    # int() truncates toward zero, so order=-0.5 used to slip past the guard below
+    # as DFA0 and order=2.99 to run as DFA2 -- a silently different detrending than
+    # the one asked for, with no trace anywhere but the provenance record.
+    if isinstance(order, bool) or order != int(order):
+        raise ValueError(
+            f"order must be an integer polynomial degree, got {order!r}; "
+            "int() would truncate it toward zero and detrend at a different order"
+        )
     m = int(order)
     if m < 0:
         raise ValueError(f"order must be non-negative, got {order!r}")
@@ -498,6 +525,17 @@ def mfdfa_from_structure(
                 "d_support": float(d_support),
             },
             notes=("zeta(q) = q*h(q); tau(q) = zeta(q) - d_support",),
+        )
+        # `derive` starts a fresh diagnostics map, so without this the refit path
+        # returns exponents whose audit record has lost the degenerate-window
+        # counts the direct path reports -- and the reader of a refitted result
+        # has no way to see that a scale was fitted through dead windows.
+        # Diagnostics are non-identifying, so this cannot move `root`.
+        prov = prov.with_diagnostics(
+            **{
+                **dict(structure.provenance.diagnostics),
+                "scaling_range": scaling_range.to_canonical(),
+            }
         )
 
     return ScalingExponents(

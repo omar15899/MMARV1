@@ -198,6 +198,14 @@ The power mean is analytic through :math:`q=0` with
 :math:`q\sim10^{-12}` loses every significant digit to cancellation.
 """
 
+_TILT_BUDGET = 1 << 17
+r"""Cells above which :func:`_power_mean_log` reduces one :math:`q` at a time.
+
+:math:`10^5` float64 cells is under a megabyte, so below the budget the
+broadcast form costs nothing; above it the temporary grows like
+:math:`n_q N/8` and dominates the whole estimator's footprint.
+"""
+
 
 # --------------------------------------------------------------------------- #
 # Filter geometry
@@ -329,9 +337,22 @@ def _power_mean_log(log_f: FloatArray, q: FloatArray) -> FloatArray:
     Evaluated through :func:`scipy.special.logsumexp` so that
     :math:`q=-5` on a segment with :math:`F_v\sim10^{-80}` neither overflows
     nor loses precision.
+
+    Above :data:`_TILT_BUDGET` cells the reduction runs one :math:`q` at a time.
+    Broadcasting to the full :math:`(n_q \times N_n)` tilt matrix is bit-for-bit
+    identical either way, but materialising it costs: at the finest scale
+    :math:`N_n\approx N/8`, so with the default 41-point grid the peak allocation
+    was 33 times the series itself (17.6 MB at :math:`N=2^{16}`, and 1.1 GB at
+    :math:`N=2^{22}`) against 3.2 for the structure function, which already
+    reduced this way. Below the budget the matrix is at most a megabyte and the
+    vectorised form is kept, because a Python loop over :math:`q` on the small
+    segment counts of the coarse scales is pure call overhead.
     """
     n_seg = log_f.size
-    lse = np.asarray(logsumexp(q[:, None] * log_f[None, :], axis=1), dtype=np.float64)
+    if q.size * n_seg > _TILT_BUDGET:
+        lse = np.array([logsumexp(float(qi) * log_f) for qi in q], dtype=np.float64)
+    else:
+        lse = np.asarray(logsumexp(q[:, None] * log_f[None, :], axis=1), dtype=np.float64)
     log_mean = lse - math.log(n_seg)
     small = np.abs(q) < _Q_ZERO_TOL
     safe_q = np.where(small, 1.0, q)

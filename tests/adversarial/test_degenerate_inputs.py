@@ -30,9 +30,16 @@ from mmar.core.types import FloatArray
 from mmar.core.validate import DataQualityError, validate_measure, validate_series
 from mmar.estimators.box_counting import coarse_holder, generalised_dimensions, histogram_spectrum
 from mmar.estimators.chhabra_jensen import chhabra_jensen
+from mmar.estimators.ghe import generalised_hurst
 from mmar.estimators.mfdma import mfdma
 from mmar.estimators.pointwise import leader_holder, oscillation_holder, wavelet_holder
-from mmar.inference.bootstrap import bootstrap_descriptors
+from mmar.estimators.structure_function import mfc_exponents
+from mmar.inference.bootstrap import (
+    bootstrap_descriptors,
+    optimal_block_length,
+    politis_white_block_length,
+)
+from mmar.inference.tests import monofractal_test
 from mmar.models.fbm import fbm
 
 pywt = pytest.importorskip("pywt", reason="the wavelet estimators need PyWavelets")
@@ -447,4 +454,282 @@ def test_one_outlier_leaves_alpha_0_alone_but_not_the_width() -> None:
     assert shift_alpha_0 < 3.0, (
         f"one sample moved alpha_0 by {shift_alpha_0:.2f} bootstrap standard errors; "
         "the apex of the spectrum is not supposed to be a function of a single point"
+    )
+
+
+# --------------------------------------------------------------------------- #
+# 8. Scale invariance: the amplitude of a series is not one of its exponents
+# --------------------------------------------------------------------------- #
+#
+# ``mmar.core.validate.require_squarable`` states the library-wide invariant in
+# its own words: "Every exponent this library reports is invariant under
+# x -> c*x". Rescaling shifts the intercept of every log--log fit and no slope.
+# Each attack below rescales a *legal* series and asks whether the answer moved.
+
+
+def _fgn(h: float = 0.8, *, seed: int = 3, n: int = 2048) -> FloatArray:
+    """Increments of an exact fBm path: a stationary series with real memory."""
+    return np.asarray(np.diff(fbm(n, h, seed=make_rng(seed))), dtype=np.float64)
+
+
+def test_politis_white_block_length_survives_a_rescaled_series() -> None:
+    r"""Attack: the Politis--White rule on the same fGn at eight amplitudes.
+
+    Every quantity in the rule is a second or fourth power of the data, so it
+    collapsed long before float64 did. Measured on fGn (:math:`H=0.8`,
+    :math:`n=2047` increments), which needs :math:`b^\*=85`:
+
+    ==============  =========  =====================================
+    :math:`c`       :math:`b^\*`  mechanism
+    ==============  =========  =====================================
+    :math:`1`       85         --
+    :math:`10^{-140}`  1       :math:`\hat g(0)^2` underflows although
+                               :math:`\hat g(0)=5.3\times10^{-285}` is fine,
+                               so ``_optimum`` sees ``d_hat = 0``
+    :math:`10^{-160}`  1       :math:`\hat R(0)` itself underflows;
+                               ``acov[1:]/acov[0]`` is 0/0 --- a bare
+                               ``RuntimeWarning`` and an all-NaN correlogram
+    :math:`10^{160}`   1       :math:`\hat R(0)` overflows to :math:`\infty`,
+                               then :math:`\infty-\infty` in the FFT
+    ==============  =========  =====================================
+
+    ``b^\* = 1`` is not a mild degradation: it turns the moving-block bootstrap
+    into an i.i.d. bootstrap of a series with memory, and
+    ``tests/unit/test_bootstrap.py::test_block_length_one_destroys_long_memory_variance``
+    measures that this understates the true sampling standard deviation by more
+    than a factor of two. Every confidence interval downstream is then too
+    narrow, and nothing in :class:`BlockLength` says so.
+
+    The rule is exactly scale invariant --- :math:`\hat\rho` is a ratio of
+    autocovariances and only :math:`\hat G^2/\hat g(0)^2` reaches
+    :math:`b^\*` --- so the fix evaluates it on the series divided by a power of
+    two (exact, introducing no round-off) and scales the two reported
+    diagnostics back. On a well-scaled series the outputs are bit-identical.
+    """
+    x = _fgn()
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", RuntimeWarning)
+        reference = politis_white_block_length(x)
+        assert reference.moving > 8, "this fixture must need a real block to be a test"
+        # The silent cases first: at 1e-140 nothing warns, b* is simply 1.
+        for c in (1e-140, 1e-8, 1e8, 1e140, 1e-160, 1e-300, 1e160, 1e300):
+            scaled = politis_white_block_length(x * c)
+            assert scaled.moving == reference.moving, (
+                f"block length {scaled.moving} at amplitude {c:g} against "
+                f"{reference.moving} at amplitude 1, for the same series"
+            )
+            assert scaled.stationary == reference.stationary
+            assert scaled.m_hat == reference.m_hat
+            assert optimal_block_length(x * c) == reference.moving
+
+
+def test_block_length_diagnostics_are_unchanged_on_a_well_scaled_series() -> None:
+    """The scale-invariance repair must be a bit-for-bit no-op on ordinary data.
+
+    ``g_hat`` and ``spectrum_at_zero`` carry units of variance and are reported
+    in the caller's units. Dividing by a power of two and multiplying back is
+    exact whenever neither operation over- or underflows, which is every series
+    a user will actually pass.
+    """
+    x = _fgn()
+    b = politis_white_block_length(x)
+    assert b.g_hat == 0.000750717844660807
+    assert b.spectrum_at_zero == 5.346479700262868e-05
+    assert (b.moving, b.stationary, b.m_hat, b.bandwidth) == (85, 74, 51, 51)
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "OPEN DEFECT: wavelet_leaders fits float64 round-off on a signal the "
+        "wavelet annihilates, and reports alpha_0 = 0.28 for a straight line"
+    ),
+)
+def test_wavelet_leaders_does_not_fit_round_off_on_a_polynomial() -> None:
+    r"""Attack: the default estimator on a pure linear ramp, :math:`x_t = t`.
+
+    A straight line is :math:`C^\infty`: :math:`\alpha(t)\equiv 1` everywhere
+    and the spectrum is the single point :math:`\{(1,1)\}`. ``db3`` has three
+    vanishing moments and annihilates it *exactly*, so the detail coefficients
+    are algebraically zero and what survives is float64 round-off. Measured at
+    :math:`n=4096`: interior :math:`|d_{j,k}|` runs from
+    :math:`4.3\times10^{-14}` at :math:`j=1` to :math:`2.1\times10^{-12}` at
+    :math:`j=7`, against a signal of size :math:`4.1\times10^{3}` --- a relative
+    :math:`10^{-16}`, i.e. nothing.
+
+    Round-off in a linear filter grows systematically with the length of the
+    analysing support, so :math:`\log|d|` against :math:`j` is a clean straight
+    line and the estimator reports a *confident* spectrum:
+
+    ======================  =============  ==========
+    quantity                reported        truth
+    ======================  =============  ==========
+    :math:`h(2)`            :math:`+0.178`  :math:`1`
+    :math:`\alpha_0`        :math:`+0.281`  :math:`1`
+    :math:`\Delta\alpha`    :math:`1.178`   :math:`0`
+    ======================  =============  ==========
+
+    ``support_truncated`` is set, but it is documented to mean the width is a
+    *lower* bound --- an assertion in the wrong direction --- and
+    :math:`\alpha_0` carries no qualification at all. The number also moves with
+    the amplitude (:math:`\alpha_0 = 0.233 / 0.281 / 0.300` at :math:`c =
+    10^{-6} / 1 / 10^{6}`), which is the proof that it is round-off and not
+    signal: every exponent in this library is invariant under
+    :math:`x\mapsto cx`.
+
+    MF-DFA already refuses this input by name --- "scale s=20 leaves only 0
+    windows with a detrended variance above the round-off floor" --- from an
+    explicit floor :math:`(s\varepsilon)^2\langle w^2\rangle` in
+    ``_window_variances``. The wavelet families have no equivalent, and neither
+    does WTMM (:math:`\alpha_0=+0.106`, :math:`\Delta\alpha=0.849` on the same
+    ramp). The remedy is that floor, transported to the multiresolution
+    coefficient; it is a change to the estimator, not a tolerance.
+    """
+    ramp = np.arange(4096, dtype=np.float64) + 1.0
+    d = analyze(ramp, estimator="wavelet_leaders").spectrum.descriptors()
+    assert abs(d.alpha_0 - 1.0) < 0.2, (
+        f"alpha_0 = {d.alpha_0:+.4f} for a C-infinity signal whose Holder "
+        f"exponent is 1 everywhere (width {d.width:.4f}, truth 0)"
+    )
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "OPEN DEFECT: leader_holder returns h = 0.047 for a straight line; "
+        "the same round-off floor is missing from the pointwise field"
+    ),
+)
+def test_pointwise_leaders_do_not_fabricate_an_exponent_for_a_straight_line() -> None:
+    r"""Attack: the same ramp through the pointwise estimators.
+
+    The module docstring promises exactly this case is handled: "a leader can
+    vanish on a locally polynomial signal ... those cells are dropped ... and a
+    point with fewer than ``min_points`` usable scales gets ``h = nan`` rather
+    than a fabricated slope." The guard tests ``values <= 0.0``, and round-off
+    is strictly positive, so it never fires:
+    ``n_nonpositive_cells = 0`` on this input and 1280 samples receive a number.
+
+    Measured at :math:`n=4096`: ``leader_holder`` reports a median
+    :math:`\hat h = +0.047` (range :math:`-0.217` to :math:`+0.390`) with a
+    median :math:`R^2` of :math:`0.93`, and ``wavelet_holder`` :math:`+0.210`.
+    ``oscillation_holder`` --- which never divides by a vanishing quantity ---
+    returns :math:`+1.040` uniformly, the right answer up to its documented
+    saturation at 1. So the field is not merely noisy, it is wrong on the side
+    that matters: a reader would locate singularities everywhere on a straight
+    line.
+
+    That the number is round-off and nothing else is settled by two controls.
+    Adding noise of *relative* size :math:`10^{-15}` (amplitude
+    :math:`10^{-12}` on a signal of size :math:`4\times10^{3}`) moves the median
+    from :math:`+0.035` to :math:`-0.304`; and rescaling the ramp by
+    :math:`10^{\pm6}` moves it to :math:`+0.071` / :math:`+0.046`. A cubic, which
+    ``db3`` does *not* annihilate, is answered correctly and saturates at exactly
+    :math:`+3.000`.
+    """
+    ramp = np.arange(4096, dtype=np.float64) + 1.0
+    field = leader_holder(ramp)
+    finite = field.h[np.isfinite(field.h)]
+    median = float(np.median(finite)) if finite.size else float("nan")
+    assert finite.size == 0 or median > 0.9, (
+        f"median h = {median:+.4f} over {finite.size} samples of a C-infinity "
+        "signal; the correct answer is NaN (undetermined) or h >= 1"
+    )
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "OPEN DEFECT: monofractal_test rejects H0 for an exactly monofractal "
+        "series, and the verdict depends on the amplitude of the input"
+    ),
+)
+def test_monofractal_verdict_does_not_depend_on_the_amplitude() -> None:
+    r"""Attack: the chi-square monofractality test on an exact straight line.
+
+    A ramp has :math:`\zeta(q)=q` identically, and GHE recovers it to machine
+    precision at every amplitude: :math:`\hat h(2)=1.000000000000` for all four
+    below, with :math:`\max_q|\hat\zeta - q\hat H|` between
+    :math:`1.8\times10^{-15}` and :math:`1.9\times10^{-13}`. It is as monofractal
+    as a series can be. Yet the reported verdict is:
+
+    ==================  ==============  ===================================
+    :math:`c`           :math:`X^2`     :math:`p`
+    ==================  ==============  ===================================
+    :math:`1`           :math:`7.3`     :math:`1.0` (not rejected)
+    :math:`10^{150}`    :math:`41.4`    :math:`0.37`
+    :math:`10^{-150}`   :math:`48.9`    :math:`0.13`
+    :math:`10^{-300}`   :math:`100.7`   :math:`2.4\times10^{-7}` (**rejected**)
+    ==================  ==============  ===================================
+
+    :math:`X^2=\sum_i (\hat\zeta_i-\hat Hq_i)^2/\hat\sigma_i^2` is a ratio of two
+    quantities that are both pure round-off here --- the residuals *and* the
+    regression standard errors, the latter at :math:`5\times10^{-16}`. The ratio
+    of two round-off patterns is not scale invariant, so a categorical verdict
+    ("H0 monofractal is rejected") is decided by the amplitude of the input.
+    The docstring's ``.. warning::`` covers the *opposite* failure (the test is
+    anti-conservative through correlated errors); it says nothing about an
+    exactly-fitting regression, where the statistic is a disguised 0/0.
+    """
+    ramp = np.arange(4096, dtype=np.float64) + 1.0
+    verdicts = {}
+    for c in (1.0, 1e-150, 1e-300, 1e150):
+        exponents = generalised_hurst(ramp * c)
+        assert exponents.h2 == pytest.approx(1.0, abs=1e-9)
+        verdicts[c] = monofractal_test(exponents).p_value
+    assert min(verdicts.values()) > 0.05, (
+        f"H0 (monofractal) rejected for an exactly monofractal series: {verdicts}"
+    )
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "OPEN DEFECT: mfc_exponents accepts n=65, fits 0.30 decades over four "
+        "increments and reports h(2) = -0.006 with nothing to qualify it"
+    ),
+)
+def test_structure_function_min_length_is_not_a_usable_scaling_range() -> None:
+    r"""Attack: the shortest series the structure-function estimator accepts.
+
+    ``mfc_exponents`` sets ``min_length=64``, which is the library declaring 64
+    points sufficient. What that buys at :math:`n=65` is a scale ladder of
+    :math:`8\ldots16` --- 0.301 decades --- whose coarsest scale is an average of
+    **four** increments. ``ScalingRange.decades`` says in its own docstring
+    "below ~1 be suspicious"; ``MultifractalReport.summary()`` reports neither
+    it nor ``r_squared``.
+
+    On exact fBm with :math:`H=0.7` (so :math:`h(q)\equiv0.7` and
+    :math:`\Delta\alpha=0`), seven seeds at :math:`n=65`:
+
+    ======  ==================  ==================  ====================  ======
+    seed    :math:`\hat h(2)`   :math:`\Delta\alpha`  ``support_truncated``  :math:`R^2`
+    ======  ==================  ==================  ====================  ======
+    3       :math:`-0.0059`     4.186               ``False``             0.40
+    21      :math:`+0.302`      1.469               ``True``              0.09
+    100     :math:`+0.351`      2.226               ``True``              0.41
+    101     :math:`+0.863`      2.292               ``True``              0.75
+    102     :math:`+0.631`      2.627               ``False``             0.67
+    103     :math:`-0.651`      0.000               ``True``              0.34
+    104     :math:`+0.789`      0.000               ``True``              0.16
+    ======  ==================  ==================  ====================  ======
+
+    Two of seven are **negative** --- no continuous path has a negative
+    generalised Hurst exponent --- and seed 3 reports a spectrum 4.19 wide with
+    ``support_truncated = False``, i.e. as a fully resolved measurement, while
+    ``analyze``'s ``concavity_defect`` (0.083 against a median
+    :math:`\hat\sigma` of 1.89) says the fit is well conditioned. Over 20 seeds
+    :math:`\hat h(2)` spans :math:`[-0.651, +0.958]` with 10% negative.
+
+    MF-DFA raised its own floor to 256 for this reason. Either this estimator
+    does the same, or a fit spanning under a decade is refused, or the summary
+    carries the decades and :math:`R^2` that would let a reader discount it ---
+    but a bare ``h2 = -0.0059`` is not one of the three.
+    """
+    x = np.asarray(fbm(65, 0.7, seed=make_rng(3)), dtype=np.float64)
+    exponents = mfc_exponents(x)
+    assert exponents.h2 > 0.0, (
+        f"h(2) = {exponents.h2:+.6f} on fBm with H=0.7, from a fit over "
+        f"{exponents.scaling_range.decades:.3f} decades "
+        f"(R^2 = {exponents.scaling_range.r_squared:.3f})"
     )
