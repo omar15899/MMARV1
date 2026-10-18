@@ -1,6 +1,0 @@
-# Native profile: inherit the user model, effort, permissions and environment.
-
-[agents]
-# BEGIN constellation managed agent policy
-max_concurrent_threads_per_session = 64
-# END constellation managed agent policy
