@@ -10,11 +10,9 @@ Consulta el [contexto técnico](.codex/PROJECT.md), especialmente sus invariante
 antes de modificar comportamiento; verifica los comandos contra los archivos
 actuales. Lee también los AGENTS.md de las carpetas afectadas.
 
-Claude conserva su sistema en CLAUDE.md y .claude/. Sus cadenas de agentes,
-routers, logs y generación no son requisitos de Codex. Usa esas fuentes cuando
-aporten reglas técnicas pertinentes. Delega tareas independientes con archivos
-definidos; quien coordina integra, revisa y publica. Hereda la elección de
-modelo del usuario; evita commits simultáneos sobre el mismo repositorio.
+Delega tareas independientes con archivos definidos; quien coordina integra,
+revisa y publica. Hereda la elección de modelo del usuario; evita commits
+simultáneos sobre el mismo repositorio.
 
 ## Repositorio y publicación
 
