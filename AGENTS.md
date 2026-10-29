@@ -8,10 +8,11 @@ Lee el [contexto técnico](.codex/PROJECT.md) y los AGENTS.md de las carpetas
 afectadas; contrasta los comandos con los archivos actuales. El [perfil
 nativo](.codex/README.md) se edita directamente: conserva `.codex/profile.json`.
 
-Si este clon pertenece al hub y `../.codex/workspace.py` está disponible,
+Si este clon pertenece al hub y `../.codex/ecosystem/cli.py` está disponible,
 aplica su [contrato](../AGENTS.md) y el [flujo común](../.codex/WORKSPACE.md),
-con rutas relativas al hub. En un clon independiente usa `git -C <raíz_real>`
-y las herramientas del proyecto; no instales el hub incidentalmente.
+con rutas relativas al hub y el subcomando `workspace`. En un clon independiente
+usa `git -C <raíz_real>` y las herramientas del proyecto; no instales el hub
+incidentalmente.
 
 Sin hub, delimita archivos exactos y comprueba el upstream antes de editar.
 Completa el encargo, ejecuta pruebas pertinentes y revisa el diff. Publica cada
