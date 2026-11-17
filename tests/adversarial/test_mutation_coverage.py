@@ -7,6 +7,13 @@ detects is a number nothing pins, and every one of them is a number that reaches
 a reported result: a confidence interval, a spectrum width, a Hölder exponent, a
 provenance root.
 
+Thirty-eight mutations were applied one at a time; twenty-six were killed by
+``tests/unit``/``tests/theory``/``tests/integration``, two more only by a
+sibling adversarial file, and ten survived everything. One of the ten —
+dropping the tie-break in :func:`~mmar.core.legendre.concave_envelope` — turned
+out to be an equivalent mutant (max difference :math:`2\times10^{-16}` over 500
+draws) and gets no test. The other nine are here.
+
 The one entry that is *not* a hole but a live defect is
 :func:`test_curvature_is_the_second_derivative_of_the_parabolic_fit`: at the
 commit under attack ``SpectrumDescriptors.curvature`` returned the bare
@@ -21,9 +28,7 @@ import math
 import numpy as np
 import pytest
 
-from mmar.analysis import _to_level, analyze
 from mmar.core.legendre import spectrum_from_exponents
-from mmar.core.provenance import array_digest
 from mmar.core.regression import loglog_fit
 from mmar.core.types import (
     FitMethod,
@@ -245,32 +250,12 @@ def test_parametric_alpha_stderr_propagates_two_zeta_errors() -> None:
     )
 
 
-# --------------------------------------------------------------------------- #
-# core/provenance.py
-# --------------------------------------------------------------------------- #
-
-
-def test_array_digest_separates_arrays_that_differ_only_in_shape() -> None:
-    """Attack: drop ``h.update(repr(a.shape))`` from :func:`array_digest`.
-
-    The C-contiguous byte image of ``arange(6)``, ``arange(6).reshape(2, 3)``
-    and ``arange(6).reshape(3, 2)`` is identical, so without the shape in the
-    hash all three collide. A collision in an *input* digest is a collision in
-    the provenance root: two different computations become indistinguishable in
-    the audit record, which is the one property the whole module exists to
-    provide.
-    """
-    flat = np.arange(6, dtype=np.float64)
-    digests = {
-        array_digest(flat),
-        array_digest(flat.reshape(2, 3)),
-        array_digest(flat.reshape(3, 2)),
-    }
-    assert len(digests) == 3
-    # ... while a mere memory-layout change must NOT move the digest.
-    assert array_digest(flat.reshape(2, 3)) == array_digest(
-        np.asfortranarray(flat.reshape(2, 3)).T.T
-    )
+# Two further mutations survived tests/unit, tests/theory and tests/integration
+# but were killed by a sibling adversarial file, so they are covered and get no
+# test here: dropping the shape from array_digest (caught by
+# test_provenance_attacks.py::test_array_digest_binds_dtype_shape_and_normalises_byte_order)
+# and dropping the mean subtraction from analysis._to_level (caught by
+# test_convention_traps.py::test_kind_canonicalisation_is_exact_and_mislabelling_moves_the_exponent).
 
 
 # --------------------------------------------------------------------------- #
@@ -366,33 +351,3 @@ def test_trading_time_normalises_by_its_own_cumulative_endpoint() -> None:
     assert int(np.count_nonzero(theta == 1.0)) == 1
     assert theta[0] == 0.0
     assert theta[-1] == 1.0
-
-
-# --------------------------------------------------------------------------- #
-# analysis.py
-# --------------------------------------------------------------------------- #
-
-
-def test_increment_input_is_demeaned_before_it_is_integrated() -> None:
-    r"""Attack: drop the mean subtraction from ``_to_level(x, "increments")``.
-
-    The profile of Kantelhardt step 1 is :math:`Y(i)=\sum_{k\le i}(x_k-\bar x)`.
-    Without the subtraction a drifting return series integrates into a ramp, and
-    every estimator that differences the level rather than detrending it reads
-    the ramp instead of the process: on fGn with :math:`H=0.35` plus a
-    three-sigma drift, ``structure_function`` returned :math:`h(2)=0.9989` for
-    the un-demeaned profile against :math:`0.3375` for the correct one. A
-    reported Hurst exponent of one on a mean-reverting series is the textbook
-    false positive this library is meant to prevent.
-    """
-    increments = fgn(8192, 0.35, seed=4)
-    drifted = increments + 3.0 * float(np.std(increments))
-
-    level = _to_level(drifted, "increments")
-    assert abs(float(level[-1])) < 1e-8 * float(np.abs(level).max())
-
-    q = np.linspace(-3.0, 3.0, 13)
-    honest = analyze(drifted, estimator="structure_function", kind="increments", q=q)
-    ramp = analyze(np.cumsum(drifted), estimator="structure_function", kind="level", q=q)
-    assert honest.exponents.h2 < 0.5
-    assert ramp.exponents.h2 > 0.9
